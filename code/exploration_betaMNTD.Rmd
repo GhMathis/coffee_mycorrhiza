@@ -4,6 +4,13 @@ output: html_document
 date: "2025-04-25"
 ---
 
+```{r}
+library(tidyverse)
+library(picante)
+library(vegan)
+library(ape)
+library(readxl)
+```
 
 ```{r}
 data_18S <- "data/18S_AMf_PR2/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.table2"
@@ -123,9 +130,7 @@ amf_OTUs_rare %>%
 ```
 
 ```{r}
-library(picante)
-library(vegan)
-library(ape)
+
 tree_amf <- ape::read.tree(file = "data/18S_AMf_PR2/Robust_MiSeq_18S_AMf_20241120_125_samples_Glomeromycotina.tree")
 ```
 
@@ -181,15 +186,43 @@ dist(Data_abund_rela) -> afm_abund_rela_dist
 vegan::mantel.correlog(afm_abund_rela_dist,amf_phylo_dist,n.class=50, nperm =999) -> mantel_phylo_rela
 plot(mantel_phylo_rela)
 ```
-
+# NTI
 
 ```{r}
 t(Data_abund_rela) -> Data_abund_rela_t
+MNTD <- picante::ses.mntd(Data_abund_rela_t, amf_phylo_dist, abundance.weighted = T, null.model="taxa.labels")
+MNTD %>%
+  rownames_to_column("soil_code") %>%
+  left_join(soil_df2 %>%
+              rownames_to_column("soil_code"), by = "soil_code") -> MNTD_df
+MNTD_df %>%
+  ggplot()+
+  geom_histogram(aes(mntd.obs.z))
+
+MNTD_df %>%
+  pivot_longer(c(pH,sand,MO,P,K,Na))%>%
+  ggplot()+
+    facet_wrap(~name, scale ="free")+
+    geom_point(aes(value, mntd.obs.z))+
+    geom_smooth(aes(value, mntd.obs.z), method = "glm")
+
+MNTD_df %>%
+  ggplot()+
+    geom_boxplot(aes(coffee_system, mntd.obs.z))
+
+```
+
+
+# Beta NTI
+```{r}
+t(Data_abund_rela) -> Data_abund_rela_t
 betaMNTD <- picante::comdistnt(Data_abund_rela_t, amf_phylo_dist, abundance.weighted = T)
-edge_list <- as.data.frame(as.table(as.matrix(betaMNTD))) %>%
+betaMNTD_df <- as.data.frame(as.table(as.matrix(betaMNTD))) %>%
   dplyr::filter(as.character(Var1) < as.character(Var2)) %>%
   dplyr::rename(betaMNTD = Freq)
 ```
+
+
 
 ```{r}
 library(purrr)
@@ -223,6 +256,7 @@ betaMNTD_df_full %>%
   geom_histogram(aes(y= betaNTI))
 
 ```
+
 ```{r}
 soil_df2 %>%
   select(pH) %>%
@@ -235,7 +269,8 @@ soil_df2 %>%
 betaMNTD_df_full %>%
   left_join(deltapH_df,by = join_by("Var1", "Var2"))%>%
     ggplot()+
-    geom_point(aes(deltapH,betaNTI))
+    geom_point(aes(deltapH,betaNTI))+
+    geom_smooth(aes(deltapH,betaNTI), method = "glm")
 
 soil_df2 %>%
   select(MO) %>%
@@ -248,7 +283,8 @@ soil_df2 %>%
 betaMNTD_df_full %>%
   left_join(deltaMO_df,by = join_by("Var1", "Var2"))%>%
     ggplot()+
-    geom_point(aes(deltaMO,betaNTI))
+    geom_point(aes(deltaMO,betaNTI))+
+    geom_smooth(aes(deltaMO,betaNTI), method = "glm")
 
 soil_df2 %>%
   select(Na) %>%
@@ -261,7 +297,8 @@ soil_df2 %>%
 betaMNTD_df_full %>%
   left_join(deltaNa_df,by = join_by("Var1", "Var2"))%>%
     ggplot()+
-    geom_point(aes(deltaNa,betaNTI))
+    geom_point(aes(deltaNa,betaNTI))+
+    geom_smooth(aes(deltaNa,betaNTI), method = "glm")
 
 
 ```
