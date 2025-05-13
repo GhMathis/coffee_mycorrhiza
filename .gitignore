@@ -2,6 +2,13 @@
 *.txt
 *.table2
 *.xlsx
+*.xlsx#
+*.csv
+*.tif
+*.tfw
+*.Rdata
+data/*
+data/
 # History files
 .Rhistory
 .Rapp.history
