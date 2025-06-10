@@ -1,0 +1,97 @@
+---
+title: "raster_formating"
+output: html_document
+date: "2025-05-23"
+editor_options: 
+  chunk_output_type: inline
+---
+# Packages
+
+```{r}
+library(tidyverse)
+library(raster)
+library(mapview)
+library(leaflet)
+library(raster)
+```
+
+# Load raster
+
+```{r}
+land_degradation_raster <- raster("data/raster/Uganda_ldma_2020.tif/Uganda_ldma_2020.tif")
+land_degradation_raster <- ratify(land_degradation_raster)
+levels(land_degradation_raster)[[1]]$land_degradation <- c("Very low", "Low", "Medium", "High", "Very High")
+myPal1 <- rev(RColorBrewer::brewer.pal('PRGn', n=5))
+myTheme1 <- rasterVis::rasterTheme(region = myPal1)
+
+rasterVis::levelplot(land_degradation_raster,par.settings = myTheme1)
+```
+
+
+```{r}
+land_cover_raster <- raster("data/raster/Uganda_Landcover_2014_Scheme_II/Uganda_Landcover_2014_Scheme_II.tif")
+myPal2 <- pals::stepped2( n=18)
+myTheme2 <- rasterVis::rasterTheme(region = myPal2)
+
+
+rasterVis::levelplot(land_cover_raster,att ="Land_Cover", par.settings = myTheme2) 
+```
+
+
+```{r}
+ndvi_uganda <- raster("data/raster/ndvi_uganda.tif")
+
+plot(ndvi_uganda)
+```
+
+
+```{r}
+#uganda_precip_2019 <- raster("data/raster/uganda_precip_2016_2021.tif")
+#plot(uganda_precip_2019)
+```
+
+# Formating
+
+
+```{r}
+if(file.exists("outputs/raster/land_degradation_lower_res.tif")){
+  land_degradation_lower_res <- raster("outputs/raster/land_degradation_lower_res.tif")
+} else {
+  land_degradation_lower_res <- raster::aggregate(land_degradation_raster, fact=50, fun = modal,  na.rm=TRUE)
+  land_degradation_lower_res <- ratify(land_degradation_lower_res)
+  levels(land_degradation_lower_res)[[1]]$land_degradation <- c("Very low", "Low", "Medium", "High", "Very High")
+  writeRaster(land_degradation_lower_res,
+            filename = "outputs/raster/land_degradation_lower_res.tif",options=c('TFW=YES'))
+  foreign::write.dbf(levels(land_degradation_lower_res)[[1]], file = "outputs/raster/land_degradation_lower_res.tif.vat.dbf")
+}
+rasterVis::levelplot(land_degradation_lower_res,par.settings = myTheme1)
+land_degradation_lower_res %>% str
+if(file.exists("outputs/raster/land_cover_lower_res.tif")){
+  land_cover_lower_res <- raster("outputs/raster/land_cover_lower_res.tif")
+} else {
+  land_cover_resampled <- raster::aggregate(land_cover_raster,fact=150,fun = modal)
+  land_cover_resampled <- raster::resample(land_cover_resampled,land_degradation_lower_res, method = "ngb")
+  land_cover_resampled <- raster::ratify(x = land_cover_resampled)
+  levels(land_cover_resampled)[[1]]$Land_Cover <- levels(land_cover_raster)[[1]]$Land_Cover
+  
+  writeRaster(land_degradation_lower_res,
+            filename = "outputs/raster/land_degradation_lower_res.grd",
+            format = "raster",
+            overwrite = TRUE)
+  writeRaster(land_cover_resampled,"outputs/raster/land_cover_lower_res.tif",options=c('TFW=YES'))
+  foreign::write.dbf(levels(land_cover_resampled)[[1]], file = "outputs/raster/land_cover_lower_res.tif.vat.dbf")
+}
+rasterVis::levelplot(land_cover_resampled,par.settings = myTheme2)
+
+
+if(file.exists("outputs/raster/ndvi_uganda_lower_res.tif")){
+  ndvi_uganda_lower_res <- raster("outputs/raster/ndvi_uganda_lower_res.tif")
+  }else{
+  ndvi_uganda_lower_res <- resample(ndvi_uganda, land_degradation_lower_res, method = "ngb")
+  writeRaster(ndvi_uganda_lower_res,"outputs/raster/ndvi_uganda_lower_res.tif",options=c('TFW=YES'))
+}
+plot(ndvi_uganda_lower_res)
+
+```
+
+

@@ -1,0 +1,178 @@
+---
+title: "Extract data from stac API"
+output: html_document
+date: "2025-05-13"
+---
+```{r}
+library(rstac)
+library(magrittr)
+library(terra)
+library(raster)
+library(stars)
+```
+
+# NDVI raster
+## Prepartation before loading raster
+A STAC URl where data catalog is located
+```{r}
+s_obj <- stac("https://planetarycomputer.microsoft.com/api/stac/v1/")
+
+
+#Choose the location of the data (WGS) and the time
+uganda_bbox <- c(29.5, -1.5, 35.0, 4.5) #
+
+start_date <-as.Date("2023-07-01")
+end_date <-as.Date("2023-07-10")
+```
+
+Choose collection and load all information of all available dataset for the choosen location and time period
+
+```{r}
+it_obj <- s_obj %>%
+  stac_search(
+    collections = "sentinel-3-synergy-v10-l2-netcdf",
+    bbox = uganda_bbox,
+    datetime = paste0(as.character(start_date), "/", as.character(end_date))
+  ) %>%
+  get_request()
+```
+
+## Load raster in a temporary file
+```{r}
+signed_items <- it_obj %>% items_sign(sign_planetary_computer())
+
+ndvi_url1 <- signed_items$features[[1]]$assets$ndvi$href
+tmp_file1 <- tempfile(fileext = ".nc")
+download.file(ndvi_url1, destfile = tmp_file1, mode = "wb")
+```
+
+
+```{r}
+ndvi_raster1 <- read_stars(tmp_file1)
+
+plot(ndvi_raster1)
+
+```
+## Crop an resize raster 
+
+```{r}
+# Define Uganda extent as an sf object
+uganda_bbox_sf <- sf::st_as_sfc(sf::st_bbox(c(
+  xmin = 29.5, ymin = -1.5, xmax = 35.0, ymax = 4.5
+), crs = st_crs(ndvi_raster1)))
+
+# Crop the raster
+ndvi_uganda <- ndvi_raster1 %>%
+  st_crop(uganda_bbox_sf) %>%
+  as( "Raster")
+
+plot(ndvi_uganda)
+```
+
+## Save raster  
+
+```{r}
+writeRaster(ndvi_uganda,"data/raster/ndvi_uganda.tif",options=c('TFW=YES'))
+```
+
+
+# Land cover raster
+## Prepartation before loading raster
+A STAC URl where data catalog is located
+```{r}
+s_obj <- stac("https://planetarycomputer.microsoft.com/api/stac/v1/")
+
+
+#Choose the location of the data (WGS) and the time
+uganda_bbox <- c(29.5, -1.5, 35.0, 4.5) #
+
+start_date <-as.Date("2023-07-01")
+end_date <-as.Date("2023-07-31")
+```
+
+Choose collection and load all information of all available dataset for the choosen location and time period
+
+```{r}
+it_obj <- s_obj %>%
+  stac_search(
+    collections = "sentinel-3-slstr-lst-l2-netcdf",
+    bbox = uganda_bbox,
+    datetime = paste0(as.character(start_date), "/", as.character(end_date))
+  ) %>%
+  get_request()
+```
+
+## Load raster in a temporary file
+```{r}
+signed_items <- it_obj %>% items_sign(sign_planetary_computer())
+
+surface_t_url1 <- signed_items$features[[1]]$assets$`lst-in`$href
+surface_t_url2 <- signed_items$features[[2]]$assets$`lst-in`$href
+tmp_file2 <- tempfile(fileext = ".nc")
+tmp_file3 <- tempfile(fileext = ".nc")
+download.file(surface_t_url1, destfile = tmp_file2, mode = "wb")
+download.file(surface_t_url2, destfile = tmp_file3, mode = "wb")
+```
+
+
+```{r}
+library(stars)
+surface_t_raster1 <- read_stars(tmp_file2)
+surface_t_raster2 <- read_stars(tmp_file3)
+
+lst1 <- surface_t_raster1["LST"] %>%
+  as("Raster")
+lst2 <- surface_t_raster2["LST"]%>%
+  as("Raster")
+s <- merge(lst2, lst1)
+par(mfrow = c(1,2))
+plot(s)
+plot(lst1)
+```
+
+```{r}
+uganda_bbox_sf <- sf::st_as_sfc(sf::st_bbox(c(
+  xmin = 29.5, ymin = -1.5, xmax = 35.0, ymax = 4.5
+), crs = st_crs(rast_UTM_36N)))
+temp <- rast_UTM_36N %>%
+  raster() %>%
+  ratify()
+# Crop the raster
+levels(temp)
+rast_UTM_36N_cover <- temp %>%
+  raster::aggregate(fact=100, fun = modal,  na.rm=TRUE)
+plot(rast_UTM_36N_cover)
+```
+
+```{r}
+library(mapview)
+library(leaflet)
+library(leafem)
+library(rasterVis)
+
+leaflet() %>%
+  addTiles() %>% 
+  addRasterImage(rast_UTM_36N_cover, opacity = 0.7)
+```
+
+## Crop an resize raster 
+
+```{r}
+# Define Uganda extent as an sf object
+uganda_bbox_sf <- sf::st_as_sfc(sf::st_bbox(c(
+  xmin = 29.5, ymin = -1.5, xmax = 35.0, ymax = 4.5
+), crs = st_crs(ndvi_raster1)))
+
+# Crop the raster
+ndvi_uganda <- ndvi_raster1 %>%
+  st_crop(uganda_bbox_sf) %>%
+  as( "Raster")
+
+plot(ndvi_uganda)
+```
+
+## Save raster  
+
+```{r}
+writeRaster(ndvi_uganda,"data/raster/ndvi_uganda.tif",options=c('TFW=YES'))
+```

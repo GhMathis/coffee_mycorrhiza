@@ -1,0 +1,643 @@
+---
+title: "rarefaction"
+output: html_document
+date: "2025-05-23"
+---
+# Packages
+```{r}
+library(tidyverse)
+library(vegan)
+library(ape)
+```
+
+
+```{r}
+data_18S <- "data/18S_AMf_Eukaryome/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.table2"
+amf_taxonomic_levels_eucaryome <- c("kingdom", "phylum", "class", "order", "family",
+                          "genus", "species")
+
+amf_OTUs <- data_18S %>%
+  #{{import data}}
+  read_tsv() %>%
+  #{{format column names}}
+  rename_with(~sub("\\_.*", "", .)) %>%
+  rename_with(~gsub("-", "_", .)) %>%
+  rename_with(~sub("_AMF_", "", .)) %>%
+  rename_with(~sub("\\_AMF.*", "", .)) %>%
+  rename_with(~sub("ROB_T_", "CONT_ROB_", .)) %>%
+  rename_with(~sub("ROB_Tex", "CONT_ROB_T_ex", .)) %>%
+  mutate(taxonomy = str_replace_all(taxonomy, ":","_"),
+       taxonomy = str_replace_all(taxonomy, "[|]","; ")) %>%
+  #{{select samples from ROBUST project}}
+  dplyr::select(OTU, amplicon, taxonomy, starts_with("CONT", ignore.case = FALSE),
+         starts_with("ROB", ignore.case = FALSE)) %>%
+    #{{"Arbuscular mycorrhizal fungi & Mucoromycotina fine root endophytes" are selected}}
+  filter(str_detect(taxonomy,"p__Glomeromycota")) %>%
+  #filter(str_detect(taxonomy,"p__Glomeromycota")) %>%
+  mutate(taxonomy = str_replace_all(taxonomy, "(p__|c__|o__|f__|g__|s__)unclassified", "*"))%>%
+  separate_wider_delim(taxonomy, names = amf_taxonomic_levels_eucaryome, delim = "; ", cols_remove = F) %>%
+  #{{select only OTUs and controls}}
+  droplevels()
+
+taxonomy <- amf_OTUs %>%
+  dplyr::select(amplicon, OTU, taxonomy) %>%
+  separate_wider_delim(taxonomy, names = amf_taxonomic_levels_eucaryome, delim = "; ", cols_remove = F)
+ 
+
+
+d <- amf_OTUs %>% 
+  replace(amf_OTUs == 0, NA) %>%
+  dplyr::select(amplicon, starts_with("CONT")) %>%
+  pivot_longer(-amplicon, names_to = "samples", values_to = "reads") %>%
+  filter(!is.na(reads))
+
+amf_OTUs_decont <- amf_OTUs %>%
+  replace(amf_OTUs == 0, NA) %>%
+  pivot_longer(starts_with("ROB"), names_to = "samples", values_to = "reads") %>%
+  filter(!is.na(reads)) %>%
+  #{{merge with control samples}}
+  left_join(count(d, amplicon, wt = reads), by = "amplicon") %>%
+  #{{substract abundance of control samples}}
+  mutate(reads = case_when(
+    is.na(n)  ~ reads,
+    n > reads ~ 0,
+    TRUE      ~ reads - n)) %>%
+  dplyr::select(-n,-starts_with("CONT")) %>%
+  pivot_wider(names_from = samples, values_from =  reads, values_fill = 0) %>%
+  as_tibble() %>%
+  column_to_rownames(var = "amplicon") 
+```
+
+
+# Rarefaction
+
+## Rarefaction threshold
+
+```{r}
+plot.OTUcumSums <-function(x){plot(1:length(colSums(x)), log10(sort(colSums(x))+1))}
+amf_OTUs_decont %>%
+  dplyr::select(starts_with("ROB")) %>%
+  plot.OTUcumSums
+10^3.1
+log10(10)
+amf_OTUs_decont %>%
+  dplyr::select(starts_with("ROB"))%>%
+  colSums()%>%
+  sort()
+
+
+amf_OTUs_decont2 <- amf_OTUs_decont %>%
+  #{{sample to exclude}}
+  dplyr::select(starts_with("ROB"))%>%
+  dplyr::select(where(~ sum(.x) >= 10^3))
+smallest_amf <- min(colSums(amf_OTUs_decont2))
+```
+
+## rarefaction function
+
+```{r}
+rarefaction.func <- function(df,rar_sample, n_rare = 100, rarcur = T){
+  # Function that rarefy "n_rare" times and average abundance across all rarefaction
+  
+  # If rarefaction curve needed
+  if(rarcur){
+    df %>%
+      dplyr::select(starts_with("ROB")) %>%
+      t() %>%
+      vegan::rarecurve(step = 20, sample = rar_sample, col = "blue", cex = 0.6)
+  }
+  df %>%
+    dplyr::select(starts_with("ROB")) %>%
+    dim -> D
+  
+  # Compute rarefactions
+  df_rarefy = matrix(0, nrow =  D[1], ncol = D[2])
+  for(n in 1:n_rare){
+    df %>%
+      dplyr::select(starts_with("ROB")) %>%
+      t() %>%
+      vegan::rrarefy(rar_sample) %>%
+      t() + df_rarefy -> df_rarefy
+    
+  }
+  
+  # Average and format output dataframe
+  round(df_rarefy/n_rare) -> df_rarefy
+  df_rarefy %>%
+    bind_cols(
+      df %>%
+        dplyr::select(!starts_with("ROB"))
+    ) -> df_rarefy
+  rownames(df_rarefy) = rownames(df)
+  return(df_rarefy)
+}
+```
+
+
+```{r}
+
+amf_OTUs_decont2 %>% 
+  mutate(across(starts_with("ROB"), ~as.integer(.x))) -> amf_OTUs_decont2
+set.seed(2121349)
+rarefaction.func(df = amf_OTUs_decont2, rar_sample = smallest_amf, rarcur = T) -> amf_OTUs_rare
+amf_OTUs_rare %>%
+  as.data.frame()%>%
+  rownames_to_column("amplicon") %>%
+  left_join(amf_OTUs_decont %>%
+              rownames_to_column("amplicon") %>%
+              dplyr::select(-starts_with("ROB")), by ="amplicon") -> amf_OTUs_rare
+
+write.table(amf_OTUs_rare, "outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.rarefy.txt")
+```
+
+# Abundance at family level
+
+```{r}
+
+amf_OTUs_rare %>%
+  unite(taxonomy, kingdom, phylum, class, order, family, sep = "; ") %>%
+  dplyr::select(taxonomy, starts_with("ROB")) %>%
+  group_by(taxonomy)%>%
+  mutate(
+    family = paste(str_extract(
+      taxonomy,"(f_[^;*]+$)|([a-z]_[^;*]+)(?=(;\\s*\\*|\\s*\\*|$))"), # If family isn't known agglomerate a the lower taxonomic level known
+      n(),sep="_")
+  ) %>%
+  ungroup() %>%
+  dplyr::select(-taxonomy) %>%
+  group_by(family) %>%
+  summarise_all(sum) -> amf_family_rare
+rownames(amf_family_rare)
+amf_family_rare$family
+
+
+
+write.table(amf_family_rare, "outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.rarefy.family.txt")
+```
+
+```{r}
+cluster_family <- amf_OTUs_rare %>%
+  unite(taxonomy, kingdom, phylum, class, order, family, sep = "; ",remove = F) %>%
+  select(taxonomy, amplicon, OTU)
+```
+
+```{r}
+tree_amf <- read.tree(file = "data/18S_AMf_Eukaryome/Robust_MiSeq_18S_AMf_20241120_125_samples_Eukaryome_Glomeromycota.tree")
+
+all(amf_OTUs_rare$amplicon %in% tree_amf$tip.label)
+
+all(tree_amf$tip.label %in% amf_OTUs_rare$amplicon )
+```
+all OTU in the matrix are in the tree, but not all the OTU are pretense in the matrix (because of the rarefaction)
+
+```{r}
+plot(tree_amf,show.tip.label = F)
+library(ggtree)
+ggplot(tree_amf, aes(x, y)) + geom_tree() + theme_tree()
+```
+
+# Algomerate phylogenetic tree at the Family level
+```{r}
+# 1. Compute full pairwise patristic distance matrix between OTUs
+dist_mat <- cophenetic.phylo(tree_amf)  # matrix of tip-to-tip distances
+
+# 2. Prepare cluster mapping
+otu_family <- cluster_family %>%
+  # if species isn't known agglomerate a the lower taxonomic level known
+  group_by(taxonomy) %>%
+  mutate(
+    family = paste(str_extract(
+      taxonomy,"(s_[^;*]+$)|([a-z]_[^;*]+)(?=(;\\s*\\*|\\s*\\*|$))"),
+      n(),sep="_")
+  ) %>%
+  ungroup() %>%
+  select(-taxonomy) 
+
+# 3. For each pair of species, compute median inter-cluster distance
+family_list <- unique(otu_family$family)
+
+# Create a matrix to store median distances
+family_dist <- matrix(NA, nrow = length(family_list), ncol = length(family_list),
+                       dimnames = list(family_list, family_list))
+
+for (i in seq_along(family_list)) {
+  for (j in seq_along(family_list)) {
+    if (i <= j) {
+      otus1 <- otu_family$amplicon[otu_family$family == family_list[i]]
+      otus2 <- otu_family$amplicon[otu_family$family == family_list[j]]
+      
+      dists <- dist_mat[otus1, otus2, drop = FALSE]
+      family_dist[i, j] <- family_dist[j, i] <- median(dists, na.rm = TRUE)
+    }
+  }
+}
+
+# 4. Create a new tree using median distances — convert matrix to phylo
+family_tree <- nj(as.dist(family_dist))
+
+# 5. Plot the collapsed tree
+plot(family_tree, cex = 0.7, main = "family-level Tree (collapsed from OTUs)")
+```
+
+
+
+```{r}
+cluster_family %>%
+  left_join(otu_family %>%
+              dplyr::select(-OTU), by = "amplicon") %>%
+  mutate(closest_taxa = str_remove_all(taxonomy, "(; [*])"),
+          closest_taxa2 = str_extract(closest_taxa, "([a-z]_[^;*]+)$")) -> cluster_taxonomy_levels
+  
+
+otu_family %>%
+  #select(-species) %>%
+  left_join(cluster_family %>%
+              dplyr::select(amplicon, taxonomy), by = "amplicon") %>%
+  separate(taxonomy, into = paste0("L", 1:7), sep = ";\\s*", fill = "right")%>%
+  rename(labels = "family",kingdom = "L1", phylum = "L2",class = "L3", order = "L4", family = "L5",
+                           genus = "L6", species = "L7") %>%
+  dplyr::select(-c(genus, species, amplicon, OTU)) %>%
+  group_split(labels,.keep = T)
+  summarise(across(everything(), ~unique(.x))) %>%
+  left_join(as_tibble(family_tree), by = join_by(labels ==label) ) -> closest_taxa_df
+```
+
+
+```{r}
+library(pals)
+ggtree(family_tree, ladderize=T)+#geom_label(aes(label = node)) +
+  #geom_tiplab()+
+  xlim(0,1.6) -> p1
+p1
+   
+
+
+ggtree::flip(p1, 29,18) -> p2
+ggtree::flip(p2, 16,6) -> p2
+ggtree::rotate(p2, 29) -> p2
+p2 +
+  geom_cladelab(
+    data = closest_taxa_df,
+      mapping = aes(
+      node = node,
+      label = label,
+      color = order
+    ),
+    fontsize = 3,
+    align = F,
+    show.legend = T
+     ) +
+  geom_hilight(
+    data= closest_taxa_df,
+    mapping = aes(  
+    node = node,
+    fill=as.factor(class))
+  )+
+  scale_color_bmj()
+```
+
+```{r}
+ape::write.tree(phy = family_tree, file = "outputs/phylo_tree/Robust_MiSeq_18S_AMf_20241120_125_samples_Eukaryome_Glomeromycota_family.tree")
+```
+
+# Algomerate phylogenetic tree at the Genus level
+
+<!-- ```{r} -->
+<!-- # 1. Compute full pairwise patristic distance matrix between OTUs -->
+<!-- dist_mat <- cophenetic.phylo(tree_amf)  # matrix of tip-to-tip distances -->
+
+<!-- # 2. Prepare cluster mapping -->
+<!-- otu_genus <- cluster_genus %>% -->
+<!--   # if species isn't known agglomerate a the lower taxonomic level known -->
+<!--   group_by(taxonomy) %>% -->
+<!--   mutate( -->
+<!--     genus = paste(str_extract( -->
+<!--       taxonomy,"(s_[^;*]+$)|([a-z]_[^;*]+)(?=(;\\s*\\*|\\s*\\*|$))"), -->
+<!--       n(),sep="_") -->
+<!--   ) %>% -->
+<!--   ungroup() %>% -->
+<!--   select(-taxonomy)  -->
+
+<!-- # 3. For each pair of species, compute median inter-cluster distance -->
+<!-- genus_list <- unique(otu_genus$genus) -->
+
+<!-- # Create a matrix to store median distances -->
+<!-- genus_dist <- matrix(NA, nrow = length(genus_list), ncol = length(genus_list), -->
+<!--                        dimnames = list(genus_list, genus_list)) -->
+
+<!-- for (i in seq_along(genus_list)) { -->
+<!--   for (j in seq_along(genus_list)) { -->
+<!--     if (i <= j) { -->
+<!--       otus1 <- otu_genus$amplicon[otu_genus$genus == genus_list[i]] -->
+<!--       otus2 <- otu_genus$amplicon[otu_genus$genus == genus_list[j]] -->
+
+<!--       dists <- dist_mat[otus1, otus2, drop = FALSE] -->
+<!--       genus_dist[i, j] <- genus_dist[j, i] <- median(dists, na.rm = TRUE) -->
+<!--     } -->
+<!--   } -->
+<!-- } -->
+
+<!-- # 4. Create a new tree using median distances — convert matrix to phylo -->
+<!-- genus_tree <- nj(as.dist(genus_dist)) -->
+
+<!-- # 5. Plot the collapsed tree -->
+<!-- plot(genus_tree, cex = 0.7, main = "family-level Tree (collapsed from OTUs)") -->
+<!-- ``` -->
+
+
+
+<!-- ```{r} -->
+<!-- cluster_genus %>% -->
+<!--   left_join(otu_genus %>% -->
+<!--               dplyr::select(-OTU), by = "amplicon") %>% -->
+<!--   mutate(closest_taxa = str_remove_all(taxonomy, "(; [*])"), -->
+<!--           closest_taxa2 = str_extract(closest_taxa, "([a-z]_[^;*]+)$")) -> cluster_taxonomy_levels -->
+
+<!-- otu_genus %>% -->
+<!--   #select(-species) %>% -->
+<!--   left_join(cluster_genus %>% -->
+<!--               dplyr::select(amplicon, taxonomy), by = "amplicon") %>% -->
+<!--   separate(taxonomy, into = paste0("L", 1:7), sep = ";\\s*", fill = "right")%>% -->
+<!--   rename(kingdom = "L1", phylum = "L2",class = "L3", order = "L4", family = "L5", -->
+<!--                            labels = "genus", genus = "L6", species = "L7") %>% -->
+<!--   left_join(as_tibble(genus_tree), by = join_by(labels ==label) ) -> closest_taxa_df -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- library(pals) -->
+<!-- ggtree(genus_tree, ladderize=F) +geom_label(aes(label = node)) -->
+<!--    xlim(0,1.6) -> p1 -->
+<!-- closest_taxa_df %>%  -->
+<!--   filter(!is.na(family)) %>%  -->
+<!--   group_by(family) %>%  -->
+<!--   filter(parent  == min(parent)) -> node_family  -->
+
+<!-- ggtree::flip(p1, 1,49) -> p2 -->
+<!-- ggtree::flip(p1, 51,50) -> p2 -->
+<!-- p2 + -->
+<!--   geom_cladelab( -->
+<!--     data = closest_taxa_df, -->
+<!--       mapping = aes( -->
+<!--       node = node, -->
+<!--       label = label, -->
+<!--       color = family -->
+<!--     ), -->
+<!--     fontsize = 3, -->
+<!--     align = F, -->
+<!--     show.legend = T -->
+<!--      ) + -->
+<!--   scale_color_manual(values=as.vector(alphabet2(15))) -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- library(reshape2) -->
+<!-- library(pals) -->
+<!-- # 1. Compute full pairwise distance matrix between OTUs -->
+
+<!-- dist_mat <- cophenetic.phylo(tree_amf)  # matrix of tip-to-tip distances -->
+
+
+<!-- dist_mat_long <-  melt(dist_mat) -->
+<!-- dist_mat_long$Var1 <- as.character(dist_mat_long$Var1) -->
+<!-- dist_mat_long$Var2 <- as.character(dist_mat_long$Var2) -->
+<!-- dist_mat_long$value %>% summary() -->
+
+<!-- # 2. Prepare cluster mapping -->
+<!-- combine.OTU.to.taxa <- function(df, threshold =0.1){ -->
+
+
+<!--   df %>% -->
+<!--     pull(Var1) %>% -->
+<!--     unique() -> all_OTU -->
+
+<!--   cluster_OTU = list() -->
+<!--   n_taxa = 0 -->
+
+<!--   while(length(all_OTU) != 0){ -->
+<!--     n_taxa = n_taxa +1 -->
+<!--     amplicon <- all_OTU[1] -->
+
+<!--     df %>% -->
+<!--       filter(Var1 == amplicon, value< threshold) -> df_temp -->
+
+<!--     df_temp %>% -->
+<!--       mutate(taxa_name = str_c("taxa", n_taxa)) %>% -->
+<!--       select(Var2, taxa_name) -> temp_cluster_OTU_df -->
+
+<!--     cluster_OTU = c(cluster_OTU, list(temp_cluster_OTU_df)) -->
+
+<!--    all_OTU <- all_OTU[!(all_OTU %in% temp_cluster_OTU_df$Var2)] -->
+
+<!--      df %>% -->
+<!--       filter(Var1 != amplicon) -> df -->
+
+<!--   } -->
+<!--   cluster_OTU %>% -->
+<!--     bind_rows() -->
+<!-- } -->
+
+<!-- combine.OTU.to.taxa(dist_mat_long, 0.2 ) -> cluster_OTU_df -->
+
+
+<!-- tip_data <- cluster_OTU_df %>% -->
+<!--   distinct(Var2, taxa_name) %>% -->
+<!--   rename(label = Var2)  # rename to match tip labels in tree -->
+
+<!-- # Plot with ggtree -->
+<!-- p <- ggtree(tree_amf) %<+% tip_data +   # join tip_data by 'label' -->
+<!--   geom_tippoint(aes(color = taxa_name), size = 2) +  # color by taxa -->
+<!--   scale_color_manual( values =as.vector(c(alphabet2(26),alphabet2(12)))) + -->
+<!--   theme_tree2() +  -->
+<!--   theme(legend.position = "right") + -->
+<!--   labs(color = "Taxa") -->
+
+<!-- # Display plot -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- library(vegan) -->
+
+<!-- kmeans(decostand(dist_mat, method = "hellinger"), centers = 25) -> test  -->
+
+<!-- test$cluster %>% -->
+<!--   as.data.frame %>%  -->
+<!--   rownames_to_column("amplicon") %>% -->
+<!--   rename(taxa_name = ".") %>% -->
+<!--   mutate(taxa_name = str_c("taxa", taxa_name))-> kmean_OTU_df -->
+
+<!-- p2 <- ggtree(tree_amf) %<+% kmean_OTU_df +   # join tip_data by 'label' -->
+<!--   geom_tippoint(aes(color = taxa_name), size = 2) +  # color by taxa -->
+<!--   scale_color_manual( values =as.vector(c(alphabet2(25)))) + -->
+<!--   theme_tree2() +  -->
+<!--   theme(legend.position = "right") + -->
+<!--   labs(color = "Taxa") -->
+
+<!-- p2 -->
+<!-- ``` -->
+
+
+
+
+<!-- ```{r} -->
+<!-- amf_OTUs_rare %>% -->
+<!--    select(-starts_with("ROB")) -->
+
+<!-- unite(taxonomy, kingdom, phylum, class, order, family, sep = "; ",remove = F) -->
+
+<!-- reduce.taxo <- .%>% -->
+<!--   group_by(taxonomy) %>% -->
+<!--   summarise(n_otu = n(), -->
+<!--             taxa_name = unique(taxa_name)) %>% -->
+<!--   mutate(closest_taxa = find_lowest_common_taxa(taxonomy)) -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- find_lowest_common_taxa <- function(taxonomy) { -->
+<!--   split_taxa <- str_split(taxonomy, ";\\s*")  # split each string by ";" -->
+<!--   min_len <- min(lengths(split_taxa))         # shortest taxonomy string -->
+
+<!--   # Take common part across all entries -->
+<!--   common <- map(1:min_len, function(i) { -->
+<!--     ith <- map_chr(split_taxa, i) -->
+<!--     if (length(unique(ith)) == 1) unique(ith) else NULL -->
+<!--   }) %>% compact() -->
+
+<!--   # Collapse back to a string -->
+<!--   paste(unlist(common), collapse = "; ") -->
+<!-- } -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- kmean_OTU_df %>% -->
+<!--   left_join( amf_OTUs_rare %>% -->
+<!--     select(amplicon, taxonomy), -->
+<!--     by = "amplicon") %>% -->
+<!--     group_split(taxa_name,.keep = T) %>%  -->
+<!--     map(\(x) reduce.taxo(x)) %>% -->
+<!--   bind_rows() %>% -->
+<!--   mutate(closest_taxa = str_remove_all(closest_taxa, "(; [*])"), -->
+<!--           closest_taxa2 = str_extract(closest_taxa, "([a-z]_[^;*]+)$")) -> cluster_taxonomy_levels -->
+
+<!-- cluster_taxonomy_levels$closest_taxa2 -->
+<!-- # 3. For each pair of species, compute median inter-cluster distance -->
+<!-- cluster_list <- unique(kmean_OTU_df$taxa_name) -->
+
+<!-- # Create a matrix to store median distances -->
+<!-- cluster_dist <- matrix(NA, nrow = length(cluster_list), ncol = length(cluster_list), -->
+<!--                        dimnames = list(cluster_list, cluster_list)) -->
+
+<!-- for (i in seq_along(cluster_list)) { -->
+<!--   for (j in seq_along(cluster_list)) { -->
+<!--     if (i <= j) { -->
+<!--       sp1_otus <- kmean_OTU_df$amplicon[kmean_OTU_df$taxa_name == cluster_list[i]] -->
+<!--       sp2_otus <- kmean_OTU_df$amplicon[kmean_OTU_df$taxa_name == cluster_list[j]] -->
+
+<!--       dists <- dist_mat[sp1_otus, sp2_otus, drop = FALSE] -->
+<!--       cluster_dist[i, j] <- cluster_dist[j, i] <- median(dists, na.rm = TRUE) -->
+<!--     } -->
+<!--   } -->
+<!-- } -->
+
+<!-- # 4. Create a new tree using median distances — convert matrix to phylo -->
+<!-- cluster_tree <- nj(cluster_dist) -->
+
+
+<!-- cluster_taxonomy_levels %>% -->
+<!--   select(-taxonomy) %>% -->
+<!--   group_by(taxa_name)  %>% -->
+<!--   summarise(n_otu = sum(n_otu), -->
+<!--             closest_taxa = unique(closest_taxa), -->
+<!--             closest_taxa2 = unique(closest_taxa2)) %>% -->
+<!--   mutate(closest_taxa = if_else(closest_taxa == "", NA_character_, closest_taxa)) %>% -->
+<!--   separate(closest_taxa, into = paste0("L", 1:7), sep = ";\\s*", fill = "right")%>% -->
+<!--   rename(kingdom = "L1", phylum = "L2",class = "L3", order = "L4", family = "L5", -->
+<!--                            genus = "L6", species = "L7", label = "taxa_name") %>% -->
+<!--   left_join(as_tibble(cluster_tree), by = "label" ) -> closest_taxa_df -->
+
+
+
+<!-- closest_taxa_df %>% -->
+<!--   filter(!is.na(genus)) %>% -->
+<!--   group_by(genus) %>% -->
+<!--   filter(parent  == min(parent)) -> node_genus -->
+
+<!-- closest_taxa_df %>% -->
+<!--   filter(!is.na(family)) %>% -->
+<!--   group_by(family) %>% pull(family) -->
+<!--   filter(parent  == min(parent)) -> node_family -->
+
+<!-- ggtree(cluster_tree, ladderize=F)+ -->
+<!--    geom_tiplab() + -->
+<!--    geom_cladelab( -->
+<!--           data = node_genus, -->
+<!--           mapping = aes( -->
+<!--              node = parent,  -->
+<!--              label = genus,  -->
+<!--              color = genus -->
+<!--          ), -->
+<!--           #hjust=2.5, -->
+<!--           fontsize = 3, -->
+<!--           horizontal=FALSE, -->
+<!--           align = F, -->
+<!--           show.legend = F -->
+<!--      ) -> p1 -->
+
+<!-- ggtree::flip(p1, 29,28) -> p2 -->
+<!-- ggtree::rotate(p2, 28) -> p3 -->
+<!-- p3 + -->
+<!--    geom_strip('taxa11', 'taxa7', barsize=2, color='red',  -->
+<!--             label="associated taxa", offset.text=.1) -->
+<!--     geom_cladelab( -->
+<!--          data = closest_taxa_df %>% -->
+<!--   filter(!is.na(family)), -->
+<!--          mapping = aes( -->
+<!--              node = node,  -->
+<!--              label = family,  -->
+<!--              color = family -->
+<!--          ), -->
+
+<!--          fontsize = 3, -->
+<!--          align = F, -->
+<!--          show.legend = F -->
+<!--      ) + -->
+<!--    geom_cladelab( -->
+<!--           data = node_genus, -->
+<!--           mapping = aes( -->
+<!--              node = parent,  -->
+<!--              label = genus,  -->
+<!--              color = genus -->
+<!--          ), -->
+<!--           hjust=2.5, -->
+<!--           fontsize = 3, -->
+<!--           horizontal=FALSE, -->
+<!--           align = F, -->
+<!--           show.legend = F -->
+<!--      )  -->
+<!--   #  geom_hilight( -->
+<!--   #     data= closest_taxa_df %>% -->
+<!--   #             filter(!is.na(family)), -->
+<!--   #        mapping = aes(  -->
+<!--   #           node = node, -->
+<!--   #           fill=as.factor(family)) -->
+<!--   # ) + -->
+<!--     geom_hilight( -->
+<!--       data= node_genus, -->
+<!--          mapping = aes(  -->
+<!--             node = node, -->
+<!--             fill=as.factor(genus)) -->
+<!--   ) -->
+<!--   theme(legend.position = "right") + -->
+<!--   labs(color = "Taxa") -->
+
+
+<!-- # 5. Plot the collapsed tree -->
+<!-- plot(cluster_tree, cex = 0.7, main = "family-level Tree (collapsed from OTUs)") -->
+<!-- cluster_tree$tip.label -->
+<!-- family_tree_rooted <- root(phy = family_tree, out =3) -->
+<!-- plot(root(phy = family_tree, out =7)) -->
+<!-- ``` -->
