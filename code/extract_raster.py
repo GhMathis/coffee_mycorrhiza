@@ -8,169 +8,215 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
-
+import matplotlib.colors as colors
 
 import netCDF4
 from azure.storage.blob import ContainerClient
 import cartopy.crs as ccrs
 
-# The grid spacing for all GHE files is defined in a separate NetCDF file.
-grid_file_url = 'https://ghe.blob.core.windows.net/noaa-ghe/NPR.GEO.GHE.v1.Navigation.netcdf.gz'
+# Set up temp directory
+temp_dir = os.path.join(tempfile.gettempdir(), 'ghe')
+os.makedirs(temp_dir, exist_ok=True)
 
-temp_dir = os.path.join(tempfile.gettempdir(),'ghe')
-os.makedirs(temp_dir,exist_ok=True)
 # Azure storage constants
 storage_account_name = 'ghe'
 container_name = 'noaa-ghe'
-storage_account_url = 'https://' + storage_account_name + '.blob.core.windows.net'
-ghe_blob_root = storage_account_url + '/' + container_name + '/'
+storage_account_url = f'https://{storage_account_name}.blob.core.windows.net'
+ghe_blob_root = f'{storage_account_url}/{container_name}/'
 
-ghe_container_client = ContainerClient(account_url=storage_account_url, 
-                                         container_name=container_name,
-                                         credential=None)
-# Functions
-# Download a URL to a temporary file
+ghe_container_client = ContainerClient(
+    account_url=storage_account_url,
+    container_name=container_name,
+    credential=None
+)
+
+# Download URL helper
 def download_url(url):
-    url_as_filename = url.replace('://', '_').replace('/', '_')    
-    destination_filename = os.path.join(temp_dir,url_as_filename)    
-    urllib.request.urlretrieve(url, destination_filename)  
+    url_as_filename = url.replace('://', '_').replace('/', '_')
+    destination_filename = os.path.join(temp_dir, url_as_filename)
+    if not os.path.exists(destination_filename):
+        urllib.request.urlretrieve(url, destination_filename)
     return destination_filename
-# Download the grid spacing file
-# This file is ~150MB, so best to cache this
+
+# Load grid
+grid_file_url = 'https://ghe.blob.core.windows.net/noaa-ghe/NPR.GEO.GHE.v1.Navigation.netcdf.gz'
 grid_filename_gz = download_url(grid_file_url)
 with gzip.open(grid_filename_gz) as gz:
     grid_dataset = netCDF4.Dataset('dummy', mode='r', memory=gz.read())
-    print(grid_dataset.variables)
-    lat_grid_raw = grid_dataset['latitude']
-    lon_grid_raw = grid_dataset['longitude']
+    lat_grid_raw = grid_dataset['latitude'][:]
+    lon_grid_raw = grid_dataset['longitude'][:]
+    grid_dataset.close()
 
-# Select data
-# Data are stored as product/year/month/day/filename
-product = 'rain_rate'
-
-# Grab data from April 9, 2020
-syear = '2023'; smonth = '04'; sday = '09'
-
-# Filenames look like:
-#
-# NPR.GEO.GHE.v1.S202001170000.nc.gz
-#
-# ...where the last four digits represent time, n increments of 15 minutes from 0000
-
-# We can either sum over a whole day, or take a single 15-minute window
-single_time_point = False
-
-if single_time_point:
-    
-    # Pick an arbitrary time of day to plot
-    stime = '0200'
-    
-    filename = 'NPR.GEO.GHE.v1.S' + syear + smonth + sday + stime + '.nc.gz'
-    blob_urls = [ghe_blob_root + product + '/' + syear + '/' + smonth + '/' + sday + '/' \
-                 + filename]
-    
-else:
-    
-    prefix = product + '/' + syear  + '/' #+ smonth + '/' + sday + '/'
-    print('Finding blobs matching prefix: {}'.format(prefix))
+# Function to process a single day
+def process_day(syear, smonth, sday):
+    product = 'rain_rate'
+    prefix = f'{product}/{syear}/{smonth}/{sday}/'
     generator = ghe_container_client.list_blobs(name_starts_with=prefix)
-    blob_urls = []
-    for blob in generator:
-        blob_urls.append(ghe_blob_root + blob.name)
-    print('Found {} matching scans'.format(len(blob_urls)))
+    blob_urls = [f'{ghe_blob_root}{blob.name}' for blob in generator]
 
-####
-def process_blob(blob_url):
-    filename = download_url(blob_url)
-    with gzip.open(filename) as gz:
-        dataset = netCDF4.Dataset('dummy', mode='r', memory=gz.read())
-        rainfall_sample = dataset['rain'][:]
-        rainfall_sample[rainfall_sample < 0] = 0  # remove invalid
-        rain_units = dataset['rain'].units
-        variable_description = str(dataset.variables)
-        dataset.close()
-    return rainfall_sample, rain_units, variable_description
+    if not blob_urls:
+        print(f"No data found for {syear}-{smonth}-{sday}")
+        return None
+
+    rainfall = np.zeros(lat_grid_raw.shape)
+    for blob_url in tqdm(blob_urls, desc=f'Processing {syear}-{smonth}-{sday}'):
+        try:
+            filename = download_url(blob_url)
+            with gzip.open(filename) as gz:
+                dataset = netCDF4.Dataset('dummy', mode='r', memory=gz.read())
+                rainfall_sample = dataset['rain'][:]
+                rainfall_sample[rainfall_sample < 0] = 0
+                rainfall += rainfall_sample
+                dataset.close()
+        except Exception as e:
+            print(f"Error processing {blob_url}: {e}")
+            continue
+
+    return rainfall
+
+# Iterate over a date range
+start_date = datetime.strptime('2023-05-01', '%Y-%m-%d')
+end_date = datetime.strptime('2023-05-31', '%Y-%m-%d')  # exclusive
+
+rainfall_dict = {}
+
+current_date = start_date
+while current_date < end_date:
+    syear = current_date.strftime('%Y')
+    smonth = current_date.strftime('%m')
+    sday = current_date.strftime('%d')
+    rainfall = process_day(syear, smonth, sday)
+    if rainfall is not None:
+        rainfall_dict[current_date.strftime('%Y-%m-%d')] = rainfall
+    current_date += timedelta(days=1)
+
+# Example: print min/max for a date
+for date_str, rainfall in rainfall_dict.items():
+    print(f"{date_str}: min={np.min(rainfall)}, max={np.max(rainfall)}")
+
+
+# Initialize the total rainfall raster with zeros, same shape as the first raster
+all_dates = list(rainfall_dict.keys())
+if not all_dates:
+    raise ValueError("rainfall_dict is empty — nothing to sum!")
+
+raster_shape = rainfall_dict[all_dates[0]].shape
+total_rainfall = np.zeros(raster_shape)
+
+# Sum all daily rasters
+for date in all_dates:
+    total_rainfall += rainfall_dict[date]
+
+# Print stats
+print(f"Total rainfall raster:")
+print(f"  Shape: {total_rainfall.shape}")
+print(f"  Min: {np.min(total_rainfall)}")
+print(f"  Max: {np.max(total_rainfall)}")
 
 # Parallel execution
-rainfall = np.zeros(lat_grid_raw.shape)
-n_valid = np.zeros(lat_grid_raw.shape)
+# rainfall = np.zeros(lat_grid_raw.shape)
+# n_valid = np.zeros(lat_grid_raw.shape)
 
-rain_units = None
-variable_description = None
+# rain_units = None
+# variable_description = None
 
-with ThreadPoolExecutor() as executor:
-    results = list(tqdm(executor.map(process_blob, blob_urls), total=len(blob_urls)))
+# with ThreadPoolExecutor() as executor:
+#     results = list(tqdm(executor.map(process_blob, blob_urls), total=len(blob_urls)))
 
-# Accumulate results
-for rainfall_sample, units, description in results:
-    rainfall += rainfall_sample
-    rain_units = units
-    variable_description = description  # Overwritten, but should be same for all
+# # Accumulate results
+# for rainfall_sample, units, description in results:
+#     rainfall += rainfall_sample
+#     rain_units = units
+#     variable_description = description  # Overwritten, but should be same for all
 
-min_rf = np.min(rainfall)
-max_rf = np.max(rainfall)
+# min_rf = np.min(rainfall)
+# max_rf = np.max(rainfall)
 
-print('Rainfall ranges from {}{} to {}{}'.format(min_rf, rain_units, max_rf, rain_units))
+# print('Rainfall ranges from {}{} to {}{}'.format(min_rf, rain_units, max_rf, rain_units))
 
-rainfall_raw = rainfall.copy()
-###
+# rainfall_raw = rainfall.copy()
 
-# Take a look at what's in each NetCDF file
-print(variable_description)
+import rasterio
+from rasterio.transform import from_bounds
+# Get the dimensions of your data
+height, width = total_rainfall.shape
 
-# Prepare indices, downsample for faster plotting
-image_size = np.shape(rainfall_raw)
-nlat = image_size[0]; nlon = image_size[1]
+# Get the extent of your data from the grid files
+# Assuming the grid_dataset variables define the corners of the grid
+# For accurate georeferencing, you'd ideally use the actual corner coordinates
+# or a more robust method to derive the transform.
+# Here, we'll approximate using the min/max of your grid arrays.
+min_lon = np.nanmin(lon_grid_raw)
+max_lon = np.nanmax(lon_grid_raw)
+min_lat = np.nanmin(lat_grid_raw)
+max_lat = np.nanmax(lat_grid_raw)
 
-assert(np.shape(rainfall_raw)==np.shape(lat_grid_raw))
-assert(np.shape(rainfall_raw)==np.shape(lon_grid_raw))
+# Create a geotransform: This defines how the image coordinates
+# map to geographic coordinates.
+# from_bounds(west, south, east, north, width, height)
+# The order of arguments is crucial.
+transform = from_bounds(west=min_lon, south=min_lat, east=max_lon, north=max_lat,
+                        width=width, height=height)
 
-# Downsample by decimation
-ds_factor = 10
+# Define the coordinate reference system (CRS).
+# WGS84 (latitude/longitude) is a common choice for global data.
+# Its EPSG code is 4326.
+crs = 'EPSG:4326'
+output_raster_filename = "data/raster/rainfall/rainfall_global.tif"
+# Write the raster file
+with rasterio.open(
+    output_raster_filename,
+    'w',
+    driver='GTiff',
+    height=height,
+    width=width,
+    count=1,  # Number of bands (e.g., 1 for single-band rainfall data)
+    dtype=total_rainfall.dtype, # Use the data type of your NumPy array
+    crs=crs,
+    transform=transform,
+    nodata=-9999.0 # Set the nodata value if you have one, or comment out
+) as dst:
+    dst.write(total_rainfall, 1) # Write the rainfall_raw array to band 1
 
-lon_grid = lon_grid_raw[::ds_factor,::ds_factor,]
-lat_grid = lat_grid_raw[::ds_factor,::ds_factor,]
-rainfall = rainfall_raw[::ds_factor,::ds_factor,]
-print(lon_grid)
+print(f"\nRaster data saved to: {output_raster_filename}")
 
-#Plot rainfall
-plt.figure(figsize=(20,20))
+# Define the projection
+proj = ccrs.PlateCarree()  # or use ccrs.PlateCarree() if more appropriate
 
-# Prepare a matplotlib Basemap so we can render coastlines and borders
-m = Basemap(projection='merc',
-  llcrnrlon=np.nanmin(lon_grid),urcrnrlon=np.nanmax(lon_grid),
-  llcrnrlat=np.nanmin(lat_grid),urcrnrlat=np.nanmax(lat_grid),
-  resolution='c')
+# Set up figure and axis
+fig, ax = plt.subplots(figsize=(12, 6), subplot_kw={'projection': proj})
 
-# Convert lat/lon to a 2D grid
-# lon_grid,lat_grid = np.meshgrid(lon,lat)
-x,y = m(lon_grid,lat_grid)
+# Set extent: (lon_min, lon_max, lat_min, lat_max)
+ax.set_extent([
+    np.nanmin(lon_grid_raw), np.nanmax(lon_grid_raw),
+    np.nanmin(lat_grid_raw), np.nanmax(lat_grid_raw)
+], crs=proj)
 
-# Clip our plot values to an upper threshold, and leave anything
-# below the lower threshold as white (i.e., unplotted)
-n_files = len(blob_urls)
-upper_plot_threshold = n_files*10
-lower_plot_threshold = n_files*0.01
 
-Z = rainfall.copy()
-Z[Z > upper_plot_threshold] = upper_plot_threshold
-Z[Z < lower_plot_threshold] = np.nan
-Z = np.ma.masked_where(np.isnan(Z),Z)
-
-# Choose normalization and color mapping
-norm = mpl.colors.LogNorm(vmin=Z.min(), vmax=Z.max(), clip=True)
+# Plot the data
+total_rainfall += 1
+norm = colors.LogNorm(vmin=total_rainfall.min(), vmax=total_rainfall.max(), clip=True)
 cmap = plt.cm.Blues
 
-# Plot as a color mesh
-cs = m.pcolormesh(x,y,Z,norm=norm,cmap=cmap,shading='auto')
+# Plot the color mesh (assuming lon_grid and lat_grid are 2D)
+mesh = ax.pcolormesh(
+    lon_grid_raw, lat_grid_raw, total_rainfall,
+    transform=proj,  # specify that the data is in lat/lon
+    cmap=cmap, norm=norm, shading='auto'
+)
 
-# Draw extra stuff to make our plot look fancier... sweeping clouds on a plain background
-# are great, but sweeping clouds on contentinal outlines are *very* satisfying.
-m.drawcoastlines()
-m.drawmapboundary()
-m.drawparallels(np.arange(-90.,120.,30.),labels=[1,0,0,0])
-m.drawmeridians(np.arange(-180.,180.,60.),labels=[0,0,0,1])
-m.colorbar(cs)
+# Add coastlines, borders, gridlines
+ax.coastlines(resolution='110m')
+ax.add_feature(cfeature.BORDERS, linewidth=0.5)
+gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5)
+gl.top_labels = False
+gl.right_labels = False
 
-plt.title('Global rainfall ({})'.format(rain_units))
+# Add colorbar
+cb = plt.colorbar(mesh, ax=ax, orientation='vertical', pad=0.05)
+cb.set_label(rain_units)
+
+# Title
+plt.title(f'Global rainfall ({rain_units})')
+plt.tight_layout()
 plt.show()

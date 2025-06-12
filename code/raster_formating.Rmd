@@ -46,28 +46,53 @@ plot(ndvi_uganda)
 
 
 ```{r}
-#uganda_precip_2019 <- raster("data/raster/uganda_precip_2016_2021.tif")
-#plot(uganda_precip_2019)
+
+precip_2023 <- raster("data/raster/rainfall/rainfall_global.tif")
+plot(precip_2023)
+cellStats(precip_2023, min)
+cellStats(precip_2023, max)
 ```
 
 # Formating
 
 
 ```{r}
+
 if(file.exists("outputs/raster/land_degradation_lower_res.tif")){
   land_degradation_lower_res <- raster("outputs/raster/land_degradation_lower_res.tif")
+  land_degradation_reclassify <- raster("outputs/raster/land_degradation_reclassify.tif")
 } else {
   land_degradation_lower_res <- raster::aggregate(land_degradation_raster, fact=50, fun = modal,  na.rm=TRUE)
   land_degradation_lower_res <- ratify(land_degradation_lower_res)
   levels(land_degradation_lower_res)[[1]]$land_degradation <- c("Very low", "Low", "Medium", "High", "Very High")
+ 
+  rasterVis::levelplot(test,par.settings = myTheme1)
   writeRaster(land_degradation_lower_res,
-            filename = "outputs/raster/land_degradation_lower_res.tif",options=c('TFW=YES'))
+            filename = "outputs/raster/land_degradation_lower_res.tif",options=c('TFW=YES'), overwrite=TRUE)
   foreign::write.dbf(levels(land_degradation_lower_res)[[1]], file = "outputs/raster/land_degradation_lower_res.tif.vat.dbf")
+  
+  ### Land degradation reclassify
+  
+  m <- matrix(c(1, 1,   # values 1 → 1
+                2, 1,   # values 2 → 1
+                3, 2,   # value 3 → 2
+                4, 3,   # values 4 → 3
+                5, 3    # values 5 → 3
+                ), ncol=2, byrow=TRUE)
+  
+  reclassify(land_degradation_lower_res,m) -> land_degradation_reclassify
+  land_degradation_reclassify <- ratify(land_degradation_reclassify)
+  levels(land_degradation_reclassify)[[1]]$land_degradation <- c("Low", "Medium", "High")
+  writeRaster(land_degradation_reclassify,
+            filename = "outputs/raster/land_degradation_reclassify.tif",options=c('TFW=YES'), overwrite=TRUE)
+  foreign::write.dbf(levels(land_degradation_reclassify)[[1]], file = "outputs/raster/land_degradation_reclassify.tif.vat.dbf")
 }
+
 rasterVis::levelplot(land_degradation_lower_res,par.settings = myTheme1)
-land_degradation_lower_res %>% str
+rasterVis::levelplot(land_degradation_reclassify,par.settings = myTheme1)
+
 if(file.exists("outputs/raster/land_cover_lower_res.tif")){
-  land_cover_lower_res <- raster("outputs/raster/land_cover_lower_res.tif")
+  land_cover_resampled <- raster("outputs/raster/land_cover_lower_res.tif")
 } else {
   land_cover_resampled <- raster::aggregate(land_cover_raster,fact=150,fun = modal)
   land_cover_resampled <- raster::resample(land_cover_resampled,land_degradation_lower_res, method = "ngb")
@@ -87,11 +112,24 @@ rasterVis::levelplot(land_cover_resampled,par.settings = myTheme2)
 if(file.exists("outputs/raster/ndvi_uganda_lower_res.tif")){
   ndvi_uganda_lower_res <- raster("outputs/raster/ndvi_uganda_lower_res.tif")
   }else{
-  ndvi_uganda_lower_res <- resample(ndvi_uganda, land_degradation_lower_res, method = "ngb")
+  ndvi_uganda_lower_res <- raster::resample(ndvi_uganda, land_degradation_lower_res, method = "ngb")
   writeRaster(ndvi_uganda_lower_res,"outputs/raster/ndvi_uganda_lower_res.tif",options=c('TFW=YES'))
-}
+  }
+plot(ndvi_uganda)
+
 plot(ndvi_uganda_lower_res)
 
+
+if(file.exists("outputs/raster/precip_2023_lower_res.tif")){
+  precip_2023_lower_res <- raster("outputs/raster/precip_2023_lower_res.tif")
+  }else{
+  precip_2023_resampled <- raster::resample(precip_2023, land_degradation_lower_res, method = "ngb")
+  precip_2023_lower_res <- mask(precip_2023_resampled, land_degradation_lower_res)
+  writeRaster(precip_2023_lower_res,"outputs/raster/precip_2023_lower_res.tif",options=c('TFW=YES'), overwrite=TRUE)
+  }
+
+plot(precip_2023)
+plot(precip_2023_lower_res)
 ```
 
 
