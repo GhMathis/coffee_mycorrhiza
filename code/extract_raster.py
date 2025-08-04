@@ -89,7 +89,7 @@ while current_date < end_date:
     rainfall = process_day(syear, smonth, sday)
     if rainfall is not None:
         rainfall_dict[current_date.strftime('%Y-%m-%d')] = rainfall
-    current_date += timedelta(days=1)
+    current_date += datetime.timedelta(days=1)
 
 # Example: print min/max for a date
 for date_str, rainfall in rainfall_dict.items():
