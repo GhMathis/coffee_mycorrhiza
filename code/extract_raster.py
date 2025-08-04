@@ -9,6 +9,7 @@ import matplotlib as mpl
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 import matplotlib.colors as colors
+from datetime import datetime
 
 import netCDF4
 from azure.storage.blob import ContainerClient
@@ -75,8 +76,8 @@ def process_day(syear, smonth, sday):
     return rainfall
 
 # Iterate over a date range
-start_date = datetime.strptime('2023-05-01', '%Y-%m-%d')
-end_date = datetime.strptime('2023-05-31', '%Y-%m-%d')  # exclusive
+start_date = datetime.strptime('2022-05-31', '%Y-%m-%d')
+end_date = datetime.strptime('2023-06-01', '%Y-%m-%d')  # exclusive
 
 rainfall_dict = {}
 
@@ -162,7 +163,7 @@ transform = from_bounds(west=min_lon, south=min_lat, east=max_lon, north=max_lat
 # WGS84 (latitude/longitude) is a common choice for global data.
 # Its EPSG code is 4326.
 crs = 'EPSG:4326'
-output_raster_filename = "data/raster/rainfall/rainfall_global.tif"
+output_raster_filename = "data/raster/rainfall/rainfall_global_year2022_2023.tif"
 # Write the raster file
 with rasterio.open(
     output_raster_filename,
