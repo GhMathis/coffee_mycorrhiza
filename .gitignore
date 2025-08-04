@@ -1,5 +1,6 @@
 # Data
 *.txt
+\!packages!.txt
 *.table2
 *.xlsx
 *.xlsx#
