@@ -12,7 +12,17 @@
 *.xml
 *.ovr
 *.zip
-
+*.shp
+*.shx
+*.prj
+*.pdf
+*.qix
+*.cpg
+*.doc
+*.docx
+*.gpkg
+*.sqlite
+*.html
 
 # History files
 .Rhistory

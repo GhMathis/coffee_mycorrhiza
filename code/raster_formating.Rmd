@@ -53,6 +53,26 @@ cellStats(precip_2023, min)
 cellStats(precip_2023, max)
 ```
 
+```{r}
+library(sf)
+library(raster)
+library(terra)
+
+cluster_agro_sf <- read_sf("data/raster/Robust-Agroecological-Clusters/Robust Layers/Kmeans_Robust.shp")
+v <- vect(cluster_agro_sf)
+raster_template <- rast(ext(v), resolution = 0.01)
+crs(raster_template) <- crs(v)
+v$id <- 1:8
+r_raster <- rasterize(v, raster_template, field = "id")
+cluster_agro <- raster(r_raster)
+
+myPal3 <- ggsci::pal_simpsons()(8)
+myTheme3 <- rasterVis::rasterTheme(region = myPal3)
+cluster_agro <- ratify(cluster_agro)
+rasterVis::levelplot(cluster_agro, att = "ID", par.settings = myTheme3)
+
+```
+
 # Formating
 
 
@@ -130,6 +150,22 @@ if(file.exists("outputs/raster/precip_2023_lower_res.tif")){
 
 plot(precip_2023)
 plot(precip_2023_lower_res)
+plot(cluster_agro_resampled)
+
+if(file.exists("outputs/raster/land_cover_lower_res.tif")){
+  cluster_agro_lower_res <- raster("outputs/raster/cluster_agro_lower_res.tif")
+} else {
+  cluster_agro_resampled <- raster::resample(cluster_agro, land_degradation_lower_res, method = "ngb")
+  cluster_agro_lower_res <- mask(cluster_agro_resampled, land_degradation_lower_res)
+  cluster_agro_lower_res <- raster::ratify(x = cluster_agro_lower_res)
+  levels(cluster_agro_lower_res)[[1]]
+  levels(cluster_agro_lower_res)[[1]]$Cluster <- c("A", "B", "C", "D", "E", "F", "G", "H")
+ 
+  
+  writeRaster(land_cover_resampled,"outputs/raster/land_cover_lower_res.tif",options=c('TFW=YES'))
+  foreign::write.dbf(levels(land_cover_resampled)[[1]], file = "outputs/raster/land_cover_lower_res.tif.vat.dbf")
+}
+rasterVis::levelplot(cluster_agro_lower_res,par.settings = myTheme3)
 ```
 
 
