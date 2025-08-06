@@ -9,7 +9,7 @@ import matplotlib as mpl
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 import matplotlib.colors as colors
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import netCDF4
 from azure.storage.blob import ContainerClient
@@ -89,7 +89,7 @@ while current_date < end_date:
     rainfall = process_day(syear, smonth, sday)
     if rainfall is not None:
         rainfall_dict[current_date.strftime('%Y-%m-%d')] = rainfall
-    current_date += datetime.timedelta(days=1)
+    current_date += timedelta(days=1)
 
 # Example: print min/max for a date
 for date_str, rainfall in rainfall_dict.items():
