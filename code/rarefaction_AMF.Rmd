@@ -300,49 +300,82 @@ p2 +
 ape::write.tree(phy = family_tree, file = "outputs/phylo_tree/Robust_MiSeq_18S_AMf_20241120_125_samples_Eukaryome_Glomeromycota_family.tree")
 ```
 
+# Abundance at genus level
+
+```{r}
+amf_OTUs_rare %>%
+  unite(taxonomy, kingdom, phylum, class, order, family, genus, sep = "; ") %>%
+  dplyr::select(taxonomy, starts_with("ROB")) %>%
+  group_by(taxonomy)%>%
+  mutate(
+    genus = paste(str_extract(
+      taxonomy,"(g_[^;*]+$)|([a-z]_[^;*]+)(?=(;\\s*\\*|\\s*\\*|$))"), # If family isn't known agglomerate a the lower taxonomic level known
+      n(),sep="_")
+  ) %>%
+  ungroup() %>%
+  dplyr::select(-taxonomy) %>%
+  group_by(genus) %>%
+  summarise_all(sum) -> amf_genus_rare
+unique(amf_genus_rare$genus)
+
+
+
+write.table(amf_genus_rare, "outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.rarefy.Glomeromycota_genus.txt")
+```
+
+
 # Algomerate phylogenetic tree at the Genus level
 
-<!-- ```{r} -->
-<!-- # 1. Compute full pairwise patristic distance matrix between OTUs -->
-<!-- dist_mat <- cophenetic.phylo(tree_amf)  # matrix of tip-to-tip distances -->
+```{r}
+cluster_genus <- amf_OTUs_rare %>%
+  unite(taxonomy, kingdom, phylum, class, order, family, genus, sep = "; ",remove = F) %>%
+  select(taxonomy, amplicon, OTU)
+```
 
-<!-- # 2. Prepare cluster mapping -->
-<!-- otu_genus <- cluster_genus %>% -->
-<!--   # if species isn't known agglomerate a the lower taxonomic level known -->
-<!--   group_by(taxonomy) %>% -->
-<!--   mutate( -->
-<!--     genus = paste(str_extract( -->
-<!--       taxonomy,"(s_[^;*]+$)|([a-z]_[^;*]+)(?=(;\\s*\\*|\\s*\\*|$))"), -->
-<!--       n(),sep="_") -->
-<!--   ) %>% -->
-<!--   ungroup() %>% -->
-<!--   select(-taxonomy)  -->
+```{r}
+# 1. Compute full pairwise patristic distance matrix between OTUs
+dist_mat <- cophenetic.phylo(tree_amf)  # matrix of tip-to-tip distances
 
-<!-- # 3. For each pair of species, compute median inter-cluster distance -->
-<!-- genus_list <- unique(otu_genus$genus) -->
+# 2. Prepare cluster mapping
+otu_genus <- cluster_genus %>%
+  # if species isn't known agglomerate a the lower taxonomic level known
+  group_by(taxonomy) %>%
+  mutate(
+    genus = paste(str_extract(
+      taxonomy,"(s_[^;*]+$)|([a-z]_[^;*]+)(?=(;\\s*\\*|\\s*\\*|$))"),
+      n(),sep="_")
+  ) %>%
+  ungroup() %>%
+  select(-taxonomy)
 
-<!-- # Create a matrix to store median distances -->
-<!-- genus_dist <- matrix(NA, nrow = length(genus_list), ncol = length(genus_list), -->
-<!--                        dimnames = list(genus_list, genus_list)) -->
+# 3. For each pair of species, compute median inter-cluster distance
+genus_list <- unique(otu_genus$genus)
 
-<!-- for (i in seq_along(genus_list)) { -->
-<!--   for (j in seq_along(genus_list)) { -->
-<!--     if (i <= j) { -->
-<!--       otus1 <- otu_genus$amplicon[otu_genus$genus == genus_list[i]] -->
-<!--       otus2 <- otu_genus$amplicon[otu_genus$genus == genus_list[j]] -->
+# Create a matrix to store median distances
+genus_dist <- matrix(NA, nrow = length(genus_list), ncol = length(genus_list),
+                       dimnames = list(genus_list, genus_list))
 
-<!--       dists <- dist_mat[otus1, otus2, drop = FALSE] -->
-<!--       genus_dist[i, j] <- genus_dist[j, i] <- median(dists, na.rm = TRUE) -->
-<!--     } -->
-<!--   } -->
-<!-- } -->
+for (i in seq_along(genus_list)) {
+  for (j in seq_along(genus_list)) {
+    if (i <= j) {
+      otus1 <- otu_genus$amplicon[otu_genus$genus == genus_list[i]]
+      otus2 <- otu_genus$amplicon[otu_genus$genus == genus_list[j]]
 
-<!-- # 4. Create a new tree using median distances — convert matrix to phylo -->
-<!-- genus_tree <- nj(as.dist(genus_dist)) -->
+      dists <- dist_mat[otus1, otus2, drop = FALSE]
+      genus_dist[i, j] <- genus_dist[j, i] <- median(dists, na.rm = TRUE)
+    }
+  }
+}
 
-<!-- # 5. Plot the collapsed tree -->
-<!-- plot(genus_tree, cex = 0.7, main = "family-level Tree (collapsed from OTUs)") -->
-<!-- ``` -->
+# 4. Create a new tree using median distances — convert matrix to phylo
+genus_tree <- nj(as.dist(genus_dist))
+
+# 5. Plot the collapsed tree
+plot(genus_tree, cex = 0.7, main = "family-level Tree (collapsed from OTUs)")
+
+
+ape::write.tree(phy = genus_tree, file = "outputs/phylo_tree/Robust_MiSeq_18S_AMf_20241120_125_samples_Eukaryome_Glomeromycota_genus.tree")
+```
 
 
 
@@ -368,10 +401,10 @@ ape::write.tree(phy = family_tree, file = "outputs/phylo_tree/Robust_MiSeq_18S_A
 <!-- library(pals) -->
 <!-- ggtree(genus_tree, ladderize=F) +geom_label(aes(label = node)) -->
 <!--    xlim(0,1.6) -> p1 -->
-<!-- closest_taxa_df %>%  -->
-<!--   filter(!is.na(family)) %>%  -->
-<!--   group_by(family) %>%  -->
-<!--   filter(parent  == min(parent)) -> node_family  -->
+<!-- closest_taxa_df %>% -->
+<!--   filter(!is.na(family)) %>% -->
+<!--   group_by(family) %>% -->
+<!--   filter(parent  == min(parent)) -> node_family -->
 
 <!-- ggtree::flip(p1, 1,49) -> p2 -->
 <!-- ggtree::flip(p1, 51,50) -> p2 -->
@@ -449,7 +482,7 @@ ape::write.tree(phy = family_tree, file = "outputs/phylo_tree/Robust_MiSeq_18S_A
 <!-- p <- ggtree(tree_amf) %<+% tip_data +   # join tip_data by 'label' -->
 <!--   geom_tippoint(aes(color = taxa_name), size = 2) +  # color by taxa -->
 <!--   scale_color_manual( values =as.vector(c(alphabet2(26),alphabet2(12)))) + -->
-<!--   theme_tree2() +  -->
+<!--   theme_tree2() + -->
 <!--   theme(legend.position = "right") + -->
 <!--   labs(color = "Taxa") -->
 
@@ -460,10 +493,10 @@ ape::write.tree(phy = family_tree, file = "outputs/phylo_tree/Robust_MiSeq_18S_A
 <!-- ```{r} -->
 <!-- library(vegan) -->
 
-<!-- kmeans(decostand(dist_mat, method = "hellinger"), centers = 25) -> test  -->
+<!-- kmeans(decostand(dist_mat, method = "hellinger"), centers = 25) -> test -->
 
 <!-- test$cluster %>% -->
-<!--   as.data.frame %>%  -->
+<!--   as.data.frame %>% -->
 <!--   rownames_to_column("amplicon") %>% -->
 <!--   rename(taxa_name = ".") %>% -->
 <!--   mutate(taxa_name = str_c("taxa", taxa_name))-> kmean_OTU_df -->
@@ -471,7 +504,7 @@ ape::write.tree(phy = family_tree, file = "outputs/phylo_tree/Robust_MiSeq_18S_A
 <!-- p2 <- ggtree(tree_amf) %<+% kmean_OTU_df +   # join tip_data by 'label' -->
 <!--   geom_tippoint(aes(color = taxa_name), size = 2) +  # color by taxa -->
 <!--   scale_color_manual( values =as.vector(c(alphabet2(25)))) + -->
-<!--   theme_tree2() +  -->
+<!--   theme_tree2() + -->
 <!--   theme(legend.position = "right") + -->
 <!--   labs(color = "Taxa") -->
 
@@ -517,7 +550,7 @@ ape::write.tree(phy = family_tree, file = "outputs/phylo_tree/Robust_MiSeq_18S_A
 <!--   left_join( amf_OTUs_rare %>% -->
 <!--     select(amplicon, taxonomy), -->
 <!--     by = "amplicon") %>% -->
-<!--     group_split(taxa_name,.keep = T) %>%  -->
+<!--     group_split(taxa_name,.keep = T) %>% -->
 <!--     map(\(x) reduce.taxo(x)) %>% -->
 <!--   bind_rows() %>% -->
 <!--   mutate(closest_taxa = str_remove_all(closest_taxa, "(; [*])"), -->
@@ -576,8 +609,8 @@ ape::write.tree(phy = family_tree, file = "outputs/phylo_tree/Robust_MiSeq_18S_A
 <!--    geom_cladelab( -->
 <!--           data = node_genus, -->
 <!--           mapping = aes( -->
-<!--              node = parent,  -->
-<!--              label = genus,  -->
+<!--              node = parent, -->
+<!--              label = genus, -->
 <!--              color = genus -->
 <!--          ), -->
 <!--           #hjust=2.5, -->
@@ -590,14 +623,14 @@ ape::write.tree(phy = family_tree, file = "outputs/phylo_tree/Robust_MiSeq_18S_A
 <!-- ggtree::flip(p1, 29,28) -> p2 -->
 <!-- ggtree::rotate(p2, 28) -> p3 -->
 <!-- p3 + -->
-<!--    geom_strip('taxa11', 'taxa7', barsize=2, color='red',  -->
+<!--    geom_strip('taxa11', 'taxa7', barsize=2, color='red', -->
 <!--             label="associated taxa", offset.text=.1) -->
 <!--     geom_cladelab( -->
 <!--          data = closest_taxa_df %>% -->
 <!--   filter(!is.na(family)), -->
 <!--          mapping = aes( -->
-<!--              node = node,  -->
-<!--              label = family,  -->
+<!--              node = node, -->
+<!--              label = family, -->
 <!--              color = family -->
 <!--          ), -->
 
@@ -608,8 +641,8 @@ ape::write.tree(phy = family_tree, file = "outputs/phylo_tree/Robust_MiSeq_18S_A
 <!--    geom_cladelab( -->
 <!--           data = node_genus, -->
 <!--           mapping = aes( -->
-<!--              node = parent,  -->
-<!--              label = genus,  -->
+<!--              node = parent, -->
+<!--              label = genus, -->
 <!--              color = genus -->
 <!--          ), -->
 <!--           hjust=2.5, -->
@@ -617,17 +650,17 @@ ape::write.tree(phy = family_tree, file = "outputs/phylo_tree/Robust_MiSeq_18S_A
 <!--           horizontal=FALSE, -->
 <!--           align = F, -->
 <!--           show.legend = F -->
-<!--      )  -->
+<!--      ) -->
 <!--   #  geom_hilight( -->
 <!--   #     data= closest_taxa_df %>% -->
 <!--   #             filter(!is.na(family)), -->
-<!--   #        mapping = aes(  -->
+<!--   #        mapping = aes( -->
 <!--   #           node = node, -->
 <!--   #           fill=as.factor(family)) -->
 <!--   # ) + -->
 <!--     geom_hilight( -->
 <!--       data= node_genus, -->
-<!--          mapping = aes(  -->
+<!--          mapping = aes( -->
 <!--             node = node, -->
 <!--             fill=as.factor(genus)) -->
 <!--   ) -->
