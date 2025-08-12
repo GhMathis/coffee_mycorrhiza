@@ -17,6 +17,7 @@ library(raster)
 
 # Load raster
 
+
 ```{r}
 land_degradation_raster <- raster("data/raster/Uganda_ldma_2020.tif/Uganda_ldma_2020.tif")
 land_degradation_raster <- ratify(land_degradation_raster)

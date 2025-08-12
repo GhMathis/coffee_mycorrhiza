@@ -17,9 +17,7 @@ library(pals)
 
 library(Hmsc)
 library(ape)
-
 ```
-
 # Spatial covariate
 
 ## Sampling points
@@ -295,6 +293,104 @@ plot(genus_tree)
 str(genus_tree)
 
 ```
+## Setup training and testing samples
+
+```{r}
+set.seed(13897356)
+colnames(amf_genus_rare) -> soil_code
+ncol(amf_genus_rare) -> n_samples
+
+sample(1:n_samples, round(n_samples*0.8)) -> sample_selection
+
+soil_code[sample_selection] -> training_samples 
+soil_code[-sample_selection] -> testing_samples 
+
+# Verification of length and absence of duplicate between training and test
+
+length(training_samples)
+length(testing_samples)
+any(testing_samples %in% training_samples) 
+any(training_samples %in% testing_samples)
+
+```
+
+```{r}
+# Prepare Y matrix for families
+amf_genus_rare <- amf_genus_rare %>%
+  mutate(genus = genus %>%
+           str_remove("g__") %>%
+           str_replace_all("[a-z]__", "Unknown ") %>%
+           str_replace("_(\\d+)$", " (\\1 OTU)")) %>%
+  remove_rownames() %>%
+  column_to_rownames("genus")
+
+Y_genus <- amf_genus_rare %>%
+  filter(rowSums(across(starts_with("ROB")) != 0) > 3) %>%
+  t()
+
+# Prepare Y without zeros as a truncated version
+Y_genus_trucated <- Y_genus %>%
+  as.data.frame() %>%
+  rownames_to_column("soil_code") %>%
+  pivot_longer(-soil_code) %>%
+  mutate(value = ifelse(value == 0, NA, value)) %>%
+  pivot_wider(names_from = name, values_from = value) %>%
+  column_to_rownames("soil_code")
+
+# Filter tree to the families present in Y
+genus_tree_filter <- keep.tip(phy = genus_tree, tip = colnames(Y_genus))
+Y_genus_trucated <- Y_genus_trucated[, genus_tree_filter$tip.label]
+
+# Sample names from Y
+genus_matrix_samples <- rownames(Y_genus)
+
+
+Y_genus_trucated %>%
+  rownames_to_column("soil_code") %>%
+  filter(soil_code  %in% training_samples) %>%
+  column_to_rownames("soil_code")  -> amf_genus_rare_training
+
+Y_genus %>%
+  as.data.frame() %>%
+  rownames_to_column("soil_code") %>%
+  filter(soil_code %in% testing_samples) %>%
+  column_to_rownames("soil_code") -> amf_genus_rare_testing
+
+colSums(amf_genus_rare_training, na.rm = T)
+
+colSums(amf_genus_rare_testing, na.rm = T)
+```
+
+## Covariates
+
+```{r}
+covariate_df <- wgs84_coords %>%
+  as.data.frame() %>%
+  mutate(Sample_code = str_c("ROB_", Sample_code, "_s")) %>%
+  filter(Sample_code %in% genus_matrix_samples) %>%
+  dplyr::select(-geometry) %>%
+  mutate(
+    across(where(is.character), ~ as.factor(.x)),
+    Cluster = factor(Cluster, levels = unique(Cluster)),
+    land_degra = factor(land_degra, levels = c("Low", "Medium", "High"))
+  )
+
+
+# write.table(covariate_df, "outputs/covariate_table.txt")
+
+```
+
+
+```{r}
+covariate_df %>%
+  filter(Sample_code %in% training_samples) -> covariate_training
+
+covariate_df %>%
+  filter(Sample_code %in% testing_samples) %>%
+  dplyr::select(Sample_code,Cluster, land_degra, ndvi, precip) -> covariate_testing
+
+```
+
 
 ```{r echo=FALSE}
 library(Hmsc)
@@ -315,92 +411,16 @@ if (test.run){
   transient = 1000*thin
   verbose = 1000*thin
 }
-
-
-# Prepare Y matrix for families
-amf_genus_rare <- amf_genus_rare %>%
-  mutate(genus = genus %>%
-           str_remove("g__") %>%
-           str_replace_all("[a-z]__", "Unknown ") %>%
-           str_replace("_(\\d+)$", " (\\1 OTU)")) %>%
-  remove_rownames() %>%
-  column_to_rownames("genus")
-str(amf_genus_rare)
-
-Y_genus <- amf_genus_rare %>%
-  filter(rowSums(across(starts_with("ROB")) != 0) > 3) %>%
-  t()
-
-# Prepare Y without zeros as a truncated version
-Y_genus_trucated <- Y_genus %>%
-  as.data.frame() %>%
-  rownames_to_column("soil_code") %>%
-  pivot_longer(-soil_code) %>%
-  mutate(value = ifelse(value == 0, NA, value)) %>%
-  pivot_wider(names_from = name, values_from = value) %>%
-  column_to_rownames("soil_code")
-
-# Filter tree to the families present in Y
-genus_tree_filter <- keep.tip(phy = genus_tree, tip = colnames(Y_genus))
-Y_genus <- Y_genus[, genus_tree_filter$tip.label]
-Y_genus_trucated <- Y_genus_trucated[, genus_tree_filter$tip.label]
-
-# Sample names from Y
-genus_matrix_samples <- rownames(Y_genus)
-
-# Prepare covariate dataframe from wgs84_coords; match sample codes naming
-covariate_df <- wgs84_coords %>%
-  as.data.frame() %>%
-  mutate(Sample_code = str_c("ROB_", Sample_code, "_s")) %>%
-  filter(Sample_code %in% genus_matrix_samples)
-
-# Quick EDA plots (histograms)
-Y_genus %>%
-  as.data.frame() %>%
-  rownames_to_column("soil_code") %>%
-  pivot_longer(-soil_code) %>%
-  ggplot() +
-  facet_wrap(~name, scales = "free") +
-  geom_histogram(aes(value)) +
-  labs(x = "abundances")
-
-Y_genus_trucated %>%
-  as.data.frame() %>%
-  rownames_to_column("soil_code") %>%
-  pivot_longer(-soil_code) %>%
-  ggplot() +
-  facet_wrap(~name, scales = "free") +
-  geom_histogram(aes(value)) +
-  labs(x = "abundances without zeros")
-
-studyDesign <- data.frame(sample = rownames(Y_genus_trucated), stringsAsFactors = TRUE)
+studyDesign <- data.frame(sample = rownames(amf_genus_rare_training), stringsAsFactors = TRUE)
 rL <- HmscRandomLevel(units = studyDesign$sample)
 
-covariate_df <- covariate_df %>%
-  dplyr::select(-geometry) %>%
-  mutate(
-    across(where(is.character), ~ as.factor(.x)),
-    Cluster = factor(Cluster, levels = unique(Cluster)),
-    land_degra = factor(land_degra, levels = c("Low", "Medium", "High"))
-  )
-
-levels(covariate_df$land_degra)
-colnames(Y_genus_trucated)
-genus_tree_filter$tip.label
-
-library(GGally)
-covariate_df %>% 
-  dplyr::select(ndvi, precip) %>%
-  ggpairs()
-
-# write.table(covariate_df, "outputs/covariate_table.txt")
 ```
 
 
 ```{r echo=FALSE}
 mod_pois <- Hmsc(
-  Y = Y_genus_trucated,
-  XData = covariate_df,
+  Y = amf_genus_rare_training,
+  XData = covariate_training,
   XFormula = ~Cluster + land_degra + ndvi + precip,
   phyloTree = genus_tree_filter,
   studyDesign = studyDesign,
@@ -408,20 +428,19 @@ mod_pois <- Hmsc(
   distr = "poisson"
 )
 
-m_converg2 <- sampleMcmc(
-  mod_pois,
-  thin = thin, samples = samples, transient = transient,
-  nChains = nChains, verbose = verbose, nParallel = 12
-)
-save(m_converg2, file = "outputs/hmsc_genus.Rdata")
+# m_converg <- sampleMcmc(
+#   mod_pois,
+#   thin = thin, samples = samples, transient = transient,
+#   nChains = nChains, verbose = verbose, nParallel = 12
+# )
+# save(m_converg, file = "outputs/hmsc_genus.Rdata")
 load(file = "outputs/hmsc_genus.Rdata")
 
 ```
 
-
 ```{r echo=FALSE}
 # Binary presence/absence Y
-Y_genus_bin <- Y_genus_trucated %>%
+Y_genus_bin <- amf_genus_rare_training %>%
   as.data.frame() %>%
   rownames_to_column("soil_code") %>%
   pivot_longer(-soil_code) %>%
@@ -429,9 +448,9 @@ Y_genus_bin <- Y_genus_trucated %>%
   pivot_wider(names_from = name, values_from = value) %>%
   column_to_rownames("soil_code")
 
-m_bin <- Hmsc(
+mod_bin <- Hmsc(
   Y = Y_genus_bin,
-  XData = covariate_df,
+  XData = covariate_training,
   XFormula = ~Cluster + land_degra + ndvi + precip,
   phyloTree = genus_tree_filter,
   studyDesign = studyDesign,
@@ -439,31 +458,31 @@ m_bin <- Hmsc(
   distr = "probit"
 )
 
-m_converg2_bin <- sampleMcmc(
-  m_bin,
-  thin = thin, samples = samples, transient = transient,
-  nChains = nChains, verbose = verbose, nParallel = 12
-)
-save(m_converg2_bin, file = "outputs/hmsc_genus_bin_ndvi.Rdata")
-load(file = "outputs/hmsc_genus_bin_ndvi.Rdata")
+# m_converg_bin <- sampleMcmc(
+#   mod_bin,
+#   thin = thin, samples = samples, transient = transient,
+#   nChains = nChains, verbose = verbose, nParallel = 12
+# )
+# save(m_converg_bin, file = "outputs/hmsc_genus_bin.Rdata")
+load(file = "outputs/hmsc_genus_bin.Rdata")
 ```
 
 ```{r include=FALSE}
-postBeta2 <- getPostEstimate(m_converg2, parName = "Beta")
+postBeta2 <- getPostEstimate(m_converg, parName = "Beta")
 beta_results <- postBeta2$mean
-mpost2 <- convertToCodaObject(m_converg2)
+mpost2 <- convertToCodaObject(m_converg)
 gelman.diag(mpost2$Beta, multivariate = FALSE) -> gelman_diag_df2
 gelman_diag_df2$psrf
 
-postBeta_bin2 <- getPostEstimate(m_converg2_bin, parName = "Beta")
-mpost_bin2 <- convertToCodaObject(m_converg2_bin)
+postBeta_bin2 <- getPostEstimate(m_converg_bin, parName = "Beta")
+mpost_bin2 <- convertToCodaObject(m_converg_bin)
 gelman.diag(mpost_bin2$Beta, multivariate = FALSE) -> gelman_diag_bin_df2
 gelman_diag_bin_df2$psrf
 
 beta_results <- postBeta2$mean
-rownames(beta_results) <- colnames(m_converg2$X)
+rownames(beta_results) <- colnames(m_converg$X)
 beta_results <- beta_results * ((postBeta2$support > 0.9) + (postBeta2$support < (1 - 0.9)) > 0)
-beta_results <- t(beta_results)[genus_tree_filter$tip.label, colnames(m_converg2$X)]
+beta_results <- t(beta_results)[genus_tree_filter$tip.label, colnames(m_converg$X)]
 colnames(beta_results) <- c("Intercept", "Cluster B", "Cluster C", "Cluster E", "LD Medium", "LD High", "NDVI", "Rain")
 
 ```
@@ -496,9 +515,9 @@ Response of occurrences :
 
 # Binary betas
 beta_bin_results <- postBeta_bin2$mean
-rownames(beta_bin_results) <- colnames(m_converg2_bin$X)
+rownames(beta_bin_results) <- colnames(m_converg_bin$X)
 beta_bin_results <- beta_bin_results * ((postBeta_bin2$support > 0.9) + (postBeta_bin2$support < (1 - 0.9)) > 0)
-beta_bin_results <- t(beta_bin_results)[genus_tree_filter$tip.label, colnames(m_converg2_bin$X)]
+beta_bin_results <- t(beta_bin_results)[genus_tree_filter$tip.label, colnames(m_converg_bin$X)]
 colnames(beta_bin_results) <- c("Intercept", "Cluster B", "Cluster C", "Cluster E", "LD Medium", "LD High", "NDVI", "Rain")
 
 p_bin <- ggtree(genus_tree_filter, layout = "roundrect") +
@@ -537,7 +556,7 @@ library(purrr)
 # ------------------------------------------------------------------
 # Compute Pagel's lambda for each covariate via nlme gls + corPagel
 # ------------------------------------------------------------------
-models <- list(abund = m_converg2, bin = m_converg2_bin)
+models <- list(abund = m_converg, bin = m_converg_bin)
 
 compute.padgel.lambda <- function(models, i) {
   m <- models[[i]]
@@ -617,7 +636,7 @@ Variance explain by each variables for each genus
 abundances: 
 
 ```{r echo=FALSE, warning=FALSE}
-VP2 <- computeVariancePartitioning(m_converg2, na.ignore = TRUE)
+VP2 <- computeVariancePartitioning(m_converg, na.ignore = TRUE)
 
 
 VP2$vals %>%
@@ -645,7 +664,7 @@ Occurrences :
 
 ```{r echo=FALSE, warning=FALSE}
 
-VP_bin2 <- computeVariancePartitioning(m_converg2_bin, na.ignore = TRUE)
+VP_bin2 <- computeVariancePartitioning(m_converg_bin, na.ignore = TRUE)
 VP_bin2$vals %>%
   as.data.frame() %>%
   rownames_to_column("var") %>%
@@ -677,25 +696,25 @@ Abundances :
 ```{r echo=FALSE}
 library(corrplot)
 
-OmegaCor <- computeAssociations(m_converg2)
+OmegaCor <- computeAssociations(m_converg)
 supportLevel <- 0.95
 toPlot <- ((OmegaCor[[1]]$support > supportLevel) + (OmegaCor[[1]]$support < (1 - supportLevel)) > 0) * OmegaCor[[1]]$mean
 
 corrplot(toPlot, method = "color", col = colorRampPalette(c("blue", "white", "red"))(200),
          tl.cex = 0.6, tl.col = "black",
-         title = paste("random effect level:", m_converg2$rLNames[1]),
+         title = paste("random effect level:", m_converg$rLNames[1]),
          mar = c(0, 0, 1, 0), order = "hclust")
 ```
 
 Occurrences : 
 
 ```{r echo=FALSE}
-OmegaCor_bin <- computeAssociations(m_converg2_bin)
+OmegaCor_bin <- computeAssociations(m_converg_bin)
 toPlot_bin <- ((OmegaCor_bin[[1]]$support > supportLevel) + (OmegaCor_bin[[1]]$support < (1 - supportLevel)) > 0) * OmegaCor_bin[[1]]$mean
 
 corrplot(toPlot_bin, method = "color", col = colorRampPalette(c("blue", "white", "red"))(200),
          tl.cex = 0.6, tl.col = "black",
-         title = paste("random effect level:", m_converg2$rLNames[1]),
+         title = paste("random effect level:", m_converg_bin$rLNames[1]),
          mar = c(0, 0, 1, 0), order = "hclust")
 ```
 
@@ -731,6 +750,169 @@ data_spatial_df <- cluster_agro_df %>%
   na.omit()
 ```
 
+# Cross validation
+
+```{r}
+Gradient <- prepareGradient(mod_pois, XDataNew = covariate_testing)
+predY_test <- stats::predict(m_converg, Gradient = Gradient)
+
+Gradient2 <- prepareGradient(mod_bin, XDataNew = covariate_testing)
+predY2_test <- stats::predict(m_converg_bin, Gradient = Gradient2)
+
+EpredY_test <- predY_test[[1]]
+EpredY2_test<- predY2_test[[1]]
+
+# Average over predictions
+EpredY_test = Reduce("+", predY_test)/length(predY_test)
+EpredY2_test = Reduce("+", predY2_test)/length(predY2_test)
+
+rownames(EpredY_test) <- covariate_testing$Sample_code
+rownames(EpredY2_test) <- covariate_testing$Sample_code
+```
+
+
+```{r}
+getS <- function(p){return(rowSums(p))}
+
+# Posterior  distribution of speccies richness
+aS <- simplify2array(lapply(X = predY2_test, FUN = getS))
+
+ES = apply(aS, 1, mean) 
+sdS = sqrt(apply(aS, 1, var)) 
+S25 = apply(aS > 25, 1, mean)
+```
+
+```{r}
+Y_genus_bin_test <- amf_genus_rare_testing %>%
+  as.data.frame() %>%
+  rownames_to_column("soil_code") %>%
+  pivot_longer(-soil_code) %>%
+  mutate(value = ifelse(value==0, 0, 1)) %>%
+  pivot_wider(names_from = name, values_from = value) %>%
+  column_to_rownames("soil_code")
+
+rowSums(Y_genus_bin_test) %>%
+  as.data.frame() %>%
+  rownames_to_column("soil_code") %>%
+  rename(obs_richness = ".") -> obs_richness_df
+t(aS) %>%
+  as.data.frame() %>%
+  rename_with(~as.character(covariate_testing$Sample_code)) %>%
+  pivot_longer(everything(), names_to = "soil_code",values_to = "estimted_richness") %>% 
+  left_join(obs_richness_df, by = "soil_code") %>%
+  ggplot() +
+  geom_histogram(aes(estimted_richness)) +
+  geom_vline(aes(xintercept = obs_richness), col = "orange") +
+  facet_wrap(~soil_code) 
+```
+
+
+```{r}
+library(caret)
+library(purrr)
+
+amf_genus_rare_testing %>%
+  as.data.frame() %>%
+  rownames_to_column("soil_code") %>%
+  pivot_longer(-soil_code, names_to = "genus_names", values_to = "true_occurence") %>%
+  mutate(true_occurence = ifelse(true_occurence==0, 0,1)) -> test_samples_bin_long
+
+df_roc_AUC = data.frame(threshold =  seq(0.01, 1, length.out = 100),
+                        Accuracy = NA,
+                        TPR = NA,
+                        FPR = NA)
+
+for (n in 1:100){
+  threshold <- df_roc_AUC[n,1]
+  temp_pred <- EpredY2_test
+  temp_pred[temp_pred<=threshold] <- 0
+  temp_pred[temp_pred>threshold] <- 1
+
+  temp_pred %>%
+    as.data.frame() %>%
+    rownames_to_column("soil_code") %>%
+    pivot_longer(-soil_code, names_to = "genus_names", values_to = "pred_abund")%>%
+    left_join(test_samples_bin_long, by = join_by(genus_names,soil_code)) -> temp_pred_long
+
+  confusion_mat <- confusionMatrix(data = factor(temp_pred_long$pred_abund,levels = c(0,1)),
+                             reference = factor(temp_pred_long$true_occurence))
+  
+  df_roc_AUC[n,2] = confusion_mat$overall[["Accuracy"]]
+  df_roc_AUC[n,3] = confusion_mat$table[2,2]/(confusion_mat$table[2,2]+confusion_mat$table[1,2])
+  df_roc_AUC[n,4] = confusion_mat$table[2,1]/(confusion_mat$table[2,1]+confusion_mat$table[1,1])
+}
+
+ggplot(data=df_roc_AUC) +
+  geom_step(aes(x=FPR,y=TPR), size=1) +
+  geom_ribbon(aes(x=FPR,ymin=0,ymax=TPR),
+              alpha=0.2) +
+  coord_cartesian(xlim = c(0,1), ylim=c(0,1.01), expand = FALSE) +
+  geom_line(aes(x=seq(0,1,length.out =100), y=seq(0,1,length.out =100)), linetype='dashed') +
+  labs(x='False Positive Rate', y='True Positive Rate',
+       title = 'ROC curve of the model <model_name>')
+
+ggplot(data=df_roc_AUC) +
+  geom_line(aes(x=threshold,y=Accuracy), size=1) +
+  #geom_line(aes(x=seq(0,1,length.out =100), y=seq(0,1,length.out =100)), linetype='dashed') +
+  labs(x='Threshold', y='Accuracy',
+       title = 'ROC curve of the model <model_name>')
+```
+
+```{r}
+df_roc_AUC %>%
+  filter(TPR>0.75, FPR<0.4)
+df_roc_AUC %>%
+  filter(Accuracy>0.7)
+df_roc_AUC %>%
+  filter( FPR<0.1 )
+
+
+```
+
+
+```{r}
+EpredY_hurdel <- EpredY_test
+EpredY_hurdel[EpredY2_test <0.39] <- 0
+```
+
+```{r}
+EpredY_hurdel %>%
+  as.data.frame() %>%
+  rownames_to_column("soil_code") %>%
+  pivot_longer(-soil_code, names_to = "genus_names", values_to = "pred_abund") -> EpredY_long
+
+amf_genus_rare_testing %>%
+  as.data.frame() %>%
+  rownames_to_column("soil_code") %>%
+  pivot_longer(-soil_code, names_to = "genus_names", values_to = "true_abund") -> test_samples_long
+
+EpredY_long %>%
+  left_join(test_samples_long, by = join_by(genus_names,soil_code)) -> abund_test_df
+
+
+```
+
+```{r}
+
+
+abund_test_df %>%
+  ggplot()+
+  facet_wrap(~genus_names, scale = "free") +
+  geom_point(aes(true_abund,pred_abund)) +
+  labs(x= "Observed abundances", y = "Predicted abudances")
+
+abund_test_df %>%
+  mutate(diff = true_abund - pred_abund ) %>%
+  group_by(genus_names) %>%
+  summarise(n = n(),
+            median_abund = median(true_abund, na.rm = T),
+             mean_abund = mean(true_abund, na.rm = T),
+            sd_abund = sd(true_abund, na.rm = T),
+    RMSE = sqrt(sum(diff**2)/n))
+  
+```
+
+# Prediction
 
 ```{r echo=FALSE}
 library(viridis)
@@ -752,8 +934,8 @@ XData.grid <- data_spatial_df %>%
 Gradient <- prepareGradient(mod_pois, XDataNew = XData.grid, sDataNew = list(route = xy.grid))
 predY <- stats::predict(m_converg2, Gradient = Gradient)
 
-Gradient2 <- prepareGradient(m_bin, XDataNew = XData.grid, sDataNew = list(route = xy.grid))
-predY2 <- stats::predict(m_converg2_bin, Gradient = Gradient2)
+Gradient2 <- prepareGradient(mod_bin, XDataNew = XData.grid, sDataNew = list(route = xy.grid))
+predY2 <- stats::predict(m_converg_bin, Gradient = Gradient2)
 
 EpredY <- predY[[1]]
 EpredY2 <- predY2[[1]]
