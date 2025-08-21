@@ -20,9 +20,10 @@ s_obj <- stac("https://planetarycomputer.microsoft.com/api/stac/v1/")
 
 #Choose the location of the data (WGS) and the time
 uganda_bbox <- c(29.5, -1.5, 35.0, 4.5) #
-
-start_date <-as.Date("2023-07-01")
-end_date <-as.Date("2023-07-10")
+start_date <- as.Date("2022-06-01")
+end_date   <- as.Date("2023-05-31")
+# start_date <-as.Date("2023-07-01")
+# end_date <-as.Date("2023-07-10")
 ```
 
 Choose collection and load all information of all available dataset for the choosen location and time period
@@ -40,39 +41,41 @@ it_obj <- s_obj %>%
 ## Load raster in a temporary file
 ```{r}
 signed_items <- it_obj %>% items_sign(sign_planetary_computer())
+tmp_file_list = c()
+for(n in 1:length(signed_items$features)){
+  ndvi_url <- signed_items$features[[n]]$assets$ndvi$href
+  tmp_file_list <-c(tmp_file_list, tempfile(fileext = ".nc")) 
+  download.file(ndvi_url, destfile = tmp_file_list[n], mode = "wb")
+}
 
-ndvi_url1 <- signed_items$features[[1]]$assets$ndvi$href
-tmp_file1 <- tempfile(fileext = ".nc")
-download.file(ndvi_url1, destfile = tmp_file1, mode = "wb")
+rasters <- stack(tmp_file_list)
+ndvi_mean <- calc(rasters, mean, na.rm = TRUE)
+plot(ndvi_mean)
 ```
 
 
-```{r}
-ndvi_raster1 <- read_stars(tmp_file1)
-
-plot(ndvi_raster1)
-
-```
 ## Crop an resize raster 
 
 ```{r}
 # Define Uganda extent as an sf object
 uganda_bbox_sf <- sf::st_as_sfc(sf::st_bbox(c(
   xmin = 29.5, ymin = -1.5, xmax = 35.0, ymax = 4.5
-), crs = st_crs(ndvi_raster1)))
+), crs = st_crs(ndvi_mean)))
 
 # Crop the raster
-ndvi_uganda <- ndvi_raster1 %>%
-  st_crop(uganda_bbox_sf) %>%
+raster::crop()
+ndvi_mean_uganda <- ndvi_mean %>%
+  crop(extent(29.5, 35.0, -1.5, 4.5)) %>%
   as( "Raster")
+ 
 
-plot(ndvi_uganda)
+plot(ndvi_mean_uganda)
 ```
 
 ## Save raster  
 
 ```{r}
-writeRaster(ndvi_uganda,"data/raster/ndvi_uganda.tif",options=c('TFW=YES'))
+writeRaster(ndvi_mean_uganda,"data/raster/ndvi_mean_uganda.tif",options=c('TFW=YES'))
 ```
 
 
