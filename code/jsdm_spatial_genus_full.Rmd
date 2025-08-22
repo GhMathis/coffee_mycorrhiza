@@ -473,9 +473,13 @@ rL <- HmscRandomLevel(units = studyDesign$sample)
 
 
 ```{r echo=FALSE}
+covariate_df %>%
+  select(Cluster, land_degra, ndvi, precip, tmax) %>% 
+  mutate(across(where(is.numeric), ~vegan::decostand(.x, method = "standardize")[,1])) -> covariate_standa_df
+str(covariate_standa_df)
 mod_pois <- Hmsc(
-  Y = Y_genus_trucated,
-  XData = covariate_df,
+  Y = Y_genus,
+  XData = covariate_standa_df,
   XFormula = ~Cluster + land_degra + ndvi + precip + tmax,
   phyloTree = genus_tree_filter,
   studyDesign = studyDesign,
@@ -776,11 +780,11 @@ corrplot(toPlot_bin, method = "color", col = colorRampPalette(c("blue", "white",
 ```
 
 ```{r}
-partition = createPartition(m_converg_bin, nfolds = 6, column = "sample")
+partition = createPartition(m_converg, nfolds = 10, column = "sample")
 
-# preds_pois = computePredictedValues(m_converg, partition = partition, thin = thin, nParallel = 14) 
-# save(preds_pois, file = "outputs/pred_pois_6fold_genus.RData")
-load("outputs/pred_pois_6fold_genus.RData")
+preds_pois = computePredictedValues(m_converg, partition = partition, thin = thin, nParallel = 14)
+# save(preds_pois, file = "outputs/pred_pois_10fold_genus.RData")
+# load("outputs/pred_pois_6fold_genus.RData")
 MF_pois = evaluateModelFit(hM = m_converg, predY = preds_pois)
 mPredY_pois <- apply(abind::abind(preds_pois, along = 3), c(1, 2), matrixStats::mean2)
 
@@ -852,7 +856,9 @@ ggplot(data=df_roc_AUC) +
 
 ```{r}
 df_roc_AUC %>%
-  filter(TPR>0.75, FPR<0.4)
+  filter(TPR>0.95)
+df_roc_AUC %>%
+  filter(FPR<0.05)
 df_roc_AUC %>%
   filter(Accuracy>0.7)
 df_roc_AUC %>%
@@ -863,15 +869,10 @@ df_roc_AUC %>%
 
 
 ```{r}
-EpredY_hurdel <- mPredY_pois
-EpredY_hurdel[mPredY_bin <0.34] <- 0
-```
-
-```{r}
-EpredY_hurdel %>%
-  as.data.frame() %>%
-  rownames_to_column("soil_code") %>%
-  pivot_longer(-soil_code, names_to = "genus_names", values_to = "pred_abund") -> EpredY_long
+mPredY_pois %>%
+    as.data.frame() %>%
+    rownames_to_column("soil_code") %>%
+    pivot_longer(-soil_code, names_to = "genus_names", values_to = "pred_abund") -> EpredY_long
 
 Y_genus %>%
   as.data.frame() %>%
@@ -881,6 +882,58 @@ Y_genus %>%
 EpredY_long %>%
   left_join(test_samples_long, by = join_by(genus_names,soil_code)) -> abund_test_df
 
+abund_test_df %>%
+  mutate(diff = true_abund - pred_abund) %>%
+  group_by(genus_names) %>%
+  summarise(n = n(),
+            median_abund = median(true_abund, na.rm = T),
+            mean_abund = mean(true_abund, na.rm = T),
+            sd_abund = sd(true_abund, na.rm = T),
+            RMSE = sqrt(sum(diff**2)/n),
+            ratio_RMSE_sd = (RMSE)/sd_abund) -> recap_df
+
+# ncol(mPredY_pois)
+# threshold =  seq(0.01, 1, length.out = 100)
+# threshold =  
+# for (n in 1:100){
+#   for (i in 1:34){
+#     for (sp in 1:34){
+#       threshold[i,]
+#       EpredY_hurdel <- mPredY_pois
+#       EpredY_hurdel[mPredY_bin <= threshold[n]] <- 0
+#       EpredY_hurdel %>%
+#         as.data.frame() %>%
+#         rownames_to_column("soil_code") %>%
+#         pivot_longer(-soil_code, names_to = "genus_names", values_to = "pred_abund") -> EpredY_long
+#       
+#       Y_genus %>%
+#         as.data.frame() %>%
+#         rownames_to_column("soil_code") %>%
+#         pivot_longer(-soil_code, names_to = "genus_names", values_to = "true_abund") -> test_samples_long
+#       
+#       EpredY_long %>%
+#         left_join(test_samples_long, by = join_by(genus_names,soil_code)) -> abund_test_df
+#       
+#       abund_test_df %>%
+#         mutate(diff = true_abund - pred_abund) %>%
+#         group_by(genus_names) %>%
+#         summarise(n = n(),
+#                   median_abund = median(true_abund, na.rm = T),
+#                   mean_abund = mean(true_abund, na.rm = T),
+#                   sd_abund = sd(true_abund, na.rm = T),
+#                   RMSE = sqrt(sum(diff**2)/n),
+#                   ratio_RMSE_sd = (RMSE)/sd_abund) -> temp_df
+#       
+#       if(mean(temp_df$RMSE)< mean(recap_df$RMSE)){
+#         print(n)
+#         recap_df <- temp_df
+#         abund_save_df <- abund_test_df
+#         threshold_save <- threshold[n]
+#         EpredY_hurdel_save <- EpredY_hurdel
+#       }
+#     }
+#   }
+# }
 
 ```
 
@@ -891,15 +944,13 @@ abund_test_df %>%
   geom_point(aes(true_abund,pred_abund)) +
   labs(x= "Observed abundances", y = "Predicted abudances")
 
-abund_test_df %>%
-  mutate(diff = true_abund - pred_abund ) %>%
-  group_by(genus_names) %>%
-  summarise(n = n(),
-            median_abund = median(true_abund, na.rm = T),
-             mean_abund = mean(true_abund, na.rm = T),
-            sd_abund = sd(true_abund, na.rm = T),
-    RMSE = sqrt(sum(diff**2)/n))
-  
+
+recap_df %>%
+  ggplot() +
+  facet_wrap(~genus_names, scale = "free") +
+  geom_point(aes(genus_names, ratio_RMSE_sd))
+
+
 ```
 
 
