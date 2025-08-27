@@ -89,7 +89,7 @@ amf_OTUs_decont %>%
 amf_OTUs_decont2 <- amf_OTUs_decont %>%
   #{{sample to exclude}}
   dplyr::select(starts_with("ROB"))%>%
-  dplyr::select(where(~ sum(.x) >= 10^3))
+  dplyr::select(where(~ sum(.x) >= 10^3.9))
 smallest_amf <- min(colSums(amf_OTUs_decont2))
 ```
 
@@ -149,6 +149,107 @@ amf_OTUs_rare %>%
 
 write.table(amf_OTUs_rare, "outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.rarefy.txt")
 ```
+
+```{r}
+# library(sbm)
+# amf_OTUs_rare %>%
+#   column_to_rownames("amplicon") %>%
+#   select(starts_with("ROB")) %>%
+#   as.matrix() %>%
+#   log1p() %>%
+#   t() -> temp 
+#  temp %>%
+#    plotMyMatrix()
+#  temp_sbm <- temp %>% 
+#    estimateBipartiteSBM('poisson',
+#                         estimOptions = list(plot = T,nbCores =10),
+#                         dimLabels = c(row = "sample", col = "genus"))
+# save(temp_sbm, file = "outputs/OTU_level_sbm.Rdata")
+# plot(temp_sbm)
+# plot(temp_sbm, "expected")
+# genus_id_pois = temp_sbm$memberships[2]%>%
+#   as.data.frame()%>%
+#   rownames_to_column("id")%>%
+#   mutate(id = as.numeric(id))%>%
+#   arrange(genus)
+# grid_id_pois = temp_sbm$memberships[1]%>%
+#   as.data.frame()%>%
+#   rownames_to_column("id")%>%
+#   mutate(id = as.numeric(id))%>%
+#   arrange(sample)
+# 
+# 
+# 
+# temp[grid_id_pois$id,genus_id_pois$id]%>%
+#   plotMyMatrix(dimLabels = c("OTU", "Sample"), plotOptions = list(rowNames = T,colNames = T))+
+#   geom_hline(yintercept = abs(which(!duplicated(grid_id_pois$sample))[-1]-nrow(grid_id_pois)-1)+0.5, col ="red", linetype = 5)+
+#   geom_vline(xintercept = which(!duplicated(genus_id_pois$genus))[-1]-0.5, col = "red")+
+#   
+#   theme(legend.position = "right",
+#         element_text(angle = 45, vjust = 1, hjust = 1, size = 0.1, face="italic"),
+#         strip.text.x = element_text(colour = "gray", size=20, face ="italic"),
+#         strip.text.y  = element_text(colour = "gray", size=20, face ="italic"),
+#         axis.text.x =element_text( size = 8, face="italic"),
+#         axis.text.y = element_text(size = 10,face="italic"),
+#         strip.background = element_rect(fill="white"),
+#         panel.border = element_rect(color = "black",  fill = NA))
+# 
+# 
+# amf_OTUs_rare %>%
+#   unite(taxonomy, kingdom, phylum, class, order, family, sep = "; ") %>%
+#   dplyr::select(taxonomy, starts_with("ROB")) %>%
+#   group_by(taxonomy)%>%
+#   mutate(
+#     family = paste(str_extract(
+#       taxonomy,"(f_[^;*]+$)|([a-z]_[^;*]+)(?=(;\\s*\\*|\\s*\\*|$))"), # If family isn't known agglomerate a the lower taxonomic level known
+#       n(),sep="_")
+#   ) %>% pull(family) -> family_cluster
+# amf_OTUs_rare %>%
+#   unite(taxonomy, kingdom, phylum, class, order, family,genus, sep = "; ") %>%
+#   dplyr::select(taxonomy, starts_with("ROB")) %>%
+#   group_by(taxonomy)%>%
+#   mutate(
+#     genus = paste(str_extract(
+#       taxonomy,"(g_[^;*]+$)|([a-z]_[^;*]+)(?=(;\\s*\\*|\\s*\\*|$))"), # If family isn't known agglomerate a the lower taxonomic level known
+#       n(),sep="_")
+#   ) %>% pull(genus) -> genus_cluster
+# 
+# freq_df<-
+#   as.data.frame(
+#     table(
+#       genus_id_pois$genus,
+#       family_cluster,
+#       genus_cluster
+#       )
+#   )
+# 
+# 
+# colnames(freq_df) = c("clust_OTU",  "family", "genus","Freq")
+# w   <- which(freq_df$Freq != 0)
+# freq_df <- freq_df[w, ]
+# library(alluvial)
+# alluvial(freq_df[, c(3,1)],
+#          freq = freq_df$Freq,
+#          alpha = 0.7,
+#          cex = 1.2,
+#          cex.axis = 1.5,
+#          xw = 0.2)
+# 
+# amf_OTUs_rare %>%
+#   dplyr::select(starts_with("ROB")) %>%
+#   mutate(sbm_cluster = genus_id_pois %>%
+#            arrange(id) %>% pull(genus)) %>%
+#   group_by(sbm_cluster)%>%
+#   summarise_all(sum) %>%
+#   column_to_rownames("sbm_cluster")  %>%
+#   t()-> amf_sbmculster_rare
+# amf_sbmculster_rare[grid_id_pois$id,] %>%
+#   as.matrix() %>%
+#   log1p() %>%
+#   plotMyMatrix()
+
+```
+
 
 # Abundance at family level
 

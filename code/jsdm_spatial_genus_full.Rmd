@@ -356,6 +356,7 @@ Y_genus_trucated <- Y_genus %>%
 
 # Filter tree to the families present in Y
 genus_tree_filter <- keep.tip(phy = genus_tree, tip = colnames(Y_genus))
+Y_genus <- Y_genus[, genus_tree_filter$tip.label]
 Y_genus_trucated <- Y_genus_trucated[, genus_tree_filter$tip.label]
 
 # Sample names from Y
@@ -461,27 +462,30 @@ if (test.run){
   #with this option, the vignette evaluates slow but it reproduces the results of the
   #.pdf version
   thin = 5
-  samples = 500
+  samples = 250
   transient = 1000*thin
   verbose = 1000*thin
 }
 studyDesign <- data.frame(sample = rownames(Y_genus_trucated), stringsAsFactors = TRUE)
 rL <- HmscRandomLevel(units = studyDesign$sample)
 
+
+covariate_df %>%
+  select(Cluster, land_degra, ndvi, precip, tmax,Sample_code) %>% 
+  dplyr::filter(Sample_code %in% rownames(Y_genus)) %>%
+  dplyr::slice(match(rownames(Y_genus), Sample_code)) %>%
+  column_to_rownames("Sample_code") %>%
+  mutate(across(where(is.numeric), ~vegan::decostand(.x, method = "standardize")[,1])) -> covariate_standa_df
+
 ```
 
 
-
 ```{r echo=FALSE}
-covariate_df %>%
-  select(Cluster, land_degra, ndvi, precip, tmax) %>% 
-  mutate(across(where(is.numeric), ~vegan::decostand(.x, method = "standardize")[,1])) -> covariate_standa_df
-str(covariate_standa_df)
 mod_pois <- Hmsc(
   Y = Y_genus,
   XData = covariate_standa_df,
-  XFormula = ~Cluster + land_degra + ndvi + precip + tmax,
-  phyloTree = genus_tree_filter,
+  XFormula = ~ ndvi + precip + tmax,
+  #phyloTree = genus_tree_filter,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
   distr = "lognormal poisson"
@@ -510,9 +514,9 @@ Y_genus_bin <- Y_genus_trucated %>%
 
 mod_bin <- Hmsc(
   Y = Y_genus_bin,
-  XData = covariate_df,
-  XFormula = ~Cluster + land_degra + ndvi + precip + tmax,
-  phyloTree = genus_tree_filter,
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi + precip + tmax,
+  #phyloTree = genus_tree_filter,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
   distr = "probit"
@@ -521,7 +525,7 @@ mod_bin <- Hmsc(
 m_converg_bin <- sampleMcmc(
   mod_bin,
   thin = thin, samples = samples, transient = transient,
-  nChains = nChains, verbose = verbose, nParallel = 14
+  nChains = 12, verbose = verbose, nParallel = 12
 )
 # save(m_converg_bin, file = "outputs/hmsc_genus_bin_full.Rdata")
 # load(file = "outputs/hmsc_genus_bin_full.Rdata")
@@ -543,7 +547,7 @@ beta_results <- postBeta2$mean
 rownames(beta_results) <- colnames(m_converg$X)
 beta_results <- beta_results * ((postBeta2$support > 0.9) + (postBeta2$support < (1 - 0.9)) > 0)
 beta_results <- t(beta_results)[genus_tree_filter$tip.label, colnames(m_converg$X)]
-colnames(beta_results) <- c("Intercept", "Cluster B", "Cluster C", "Cluster E", "LD Medium", "LD High", "NDVI", "Rain", "tmax")
+colnames(beta_results) <- c("Intercept","NDVI", "Rain", "tmax") #  "Cluster B", "Cluster C", "Cluster E", "LD Medium", "LD High", 
 
 ```
 ## Models results
@@ -577,7 +581,7 @@ beta_bin_results <- postBeta_bin2$mean
 rownames(beta_bin_results) <- colnames(m_converg_bin$X)
 beta_bin_results <- beta_bin_results * ((postBeta_bin2$support > 0.9) + (postBeta_bin2$support < (1 - 0.9)) > 0)
 beta_bin_results <- t(beta_bin_results)[genus_tree_filter$tip.label, colnames(m_converg_bin$X)]
-colnames(beta_bin_results) <- c("Intercept", "Cluster B", "Cluster C", "Cluster E", "LD Medium", "LD High", "NDVI", "Rain", "tmax")
+colnames(beta_bin_results) <- c("Intercept","NDVI", "Rain", "tmax")
 
 p_bin <- ggtree(genus_tree_filter, layout = "roundrect") +
   geom_tiplab(align = TRUE) +
@@ -781,26 +785,27 @@ corrplot(toPlot_bin, method = "color", col = colorRampPalette(c("blue", "white",
 
 ```{r}
 partition = createPartition(m_converg, nfolds = 10, column = "sample")
-
+m_converg$Y
 preds_pois = computePredictedValues(m_converg, partition = partition, thin = thin, nParallel = 14)
 # save(preds_pois, file = "outputs/pred_pois_10fold_genus.RData")
-# load("outputs/pred_pois_6fold_genus.RData")
+# load("outputs/pred_pois_10fold_genus.RData")
+
 MF_pois = evaluateModelFit(hM = m_converg, predY = preds_pois)
 mPredY_pois <- apply(abind::abind(preds_pois, along = 3), c(1, 2), matrixStats::mean2)
 
-colnames(mPredY_pois) <- colnames(Y_genus_bin)
-rownames(mPredY_pois) <- rownames(Y_genus_bin)
+colnames(mPredY_pois) <- colnames(m_converg$Y)
+rownames(mPredY_pois) <- rownames(m_converg$Y)
 
-# preds_bin = computePredictedValues(m_converg_bin, partition = partition, thin = thin, nParallel = 14) 
+preds_bin = computePredictedValues(m_converg_bin, partition = partition, thin = thin, nParallel = 12)
 # save(preds_bin, file = "outputs/pred_bin_6fold_genus.RData")
-load( "outputs/pred_bin_6fold_genus.RData")
+# load( "outputs/pred_bin_6fold_genus.RData")
 MF_bin = evaluateModelFit(hM = m_converg_bin, predY = preds_bin)
 str(preds_bin)
 
 mPredY_bin <- apply(abind::abind(preds_bin, along = 3), c(1, 2), matrixStats::mean2)
 
-colnames(mPredY_bin) <- colnames(Y_genus_bin)
-rownames(mPredY_bin) <- rownames(Y_genus_bin)
+colnames(mPredY_bin) <- colnames(m_converg_bin$Y)
+rownames(mPredY_bin) <- rownames(m_converg_bin$Y)
 ```
 
 ```{r}
@@ -860,20 +865,30 @@ df_roc_AUC %>%
 df_roc_AUC %>%
   filter(FPR<0.05)
 df_roc_AUC %>%
-  filter(Accuracy>0.7)
+  filter(Accuracy>0.78)
 df_roc_AUC %>%
   filter( FPR<0.1 )
 
 
 ```
 
+```{r}
+occurence_mat <- mPredY_bin < 0.48	
+model_perf_genus<- MF_bin$AUC < 0.55
+model_perf_genus[is.na(model_perf_genus)] <- T
+occurence_mat[, model_perf_genus] <- F
+
+EpredY_hurdel <- mPredY_pois[,colnames(mPredY_bin)]
+EpredY_hurdel[occurence_mat] <- 0
+```
 
 ```{r}
-mPredY_pois %>%
+# mPredY_pois %>%
+EpredY_hurdel %>%
     as.data.frame() %>%
     rownames_to_column("soil_code") %>%
     pivot_longer(-soil_code, names_to = "genus_names", values_to = "pred_abund") -> EpredY_long
-
+rowSums(EpredY_hurdel) %>% sort
 Y_genus %>%
   as.data.frame() %>%
   rownames_to_column("soil_code") %>%
@@ -890,7 +905,13 @@ abund_test_df %>%
             mean_abund = mean(true_abund, na.rm = T),
             sd_abund = sd(true_abund, na.rm = T),
             RMSE = sqrt(sum(diff**2)/n),
-            ratio_RMSE_sd = (RMSE)/sd_abund) -> recap_df
+            ratio_RMSE_sd = (RMSE)/sd_abund) %>%
+  left_join(VP2$vals[-4,] %>% 
+              colSums() %>%
+   
+              as.data.frame() %>%
+              rownames_to_column("genus_names") %>%
+              rename(VP = "."), by = "genus_names")-> recap_df
 
 # ncol(mPredY_pois)
 # threshold =  seq(0.01, 1, length.out = 100)
@@ -947,21 +968,400 @@ abund_test_df %>%
 
 recap_df %>%
   ggplot() +
-  facet_wrap(~genus_names, scale = "free") +
   geom_point(aes(genus_names, ratio_RMSE_sd))
 
+recap_df %>%
+  ggplot() +
+  geom_point(aes(VP, RMSE))
+```
+```{r}
+Y_genus %>%
+  as.data.frame() %>%
+  rownames_to_column("soil_code") %>%
+  pivot_longer(-soil_code, names_to = "genus", values_to = "Abundance") %>%
+  group_by(soil_code) %>%
+  mutate(RelAbund = Abundance / sum(Abundance)) %>%
+  ggplot(aes(x = soil_code, y = RelAbund, fill = genus)) +
+  geom_col() +
+  labs(y = "Relative abundance") +
+  theme(aspect.ratio = 1,
+        axis.text.x = element_text(colour = "black", size=7, face="italic",angle = 45, vjust =1, hjust =1),
+        axis.text.y = element_text(colour = "black", size=13, face="italic"),
+        axis.title = element_text(colour = "black", size=12),
+        panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+        legend.title = element_text(colour = "black", size=3,
+                                    hjust =0.5),
+
+        legend.text = element_text(colour = "black", size=3))
+```
+
+```{r}
+library(PLNmodels)
+library(ggplot2)
+library(corrplot)
+library(MuMIn)
+
+data(trichoptera)
+str(trichoptera)
+setup_data <- prepare_data(Y_genus, covariate_df %>%
+                             column_to_rownames("Sample_code"))
+
+
+covariate_standa_df %>%
+  select(precip,ndvi,tmax,Cluster,land_degra) %>%
+  rownames_to_column("Sample_code") %>%
+  dplyr::filter(Sample_code %in% rownames(Y_genus)) %>%
+  dplyr::slice(match(rownames(Y_genus), Sample_code)) %>%
+  column_to_rownames("Sample_code") -> covariate_standa_df2
+
+all(rownames(Y_genus) == rownames(covariate_standa_df2))
+
+
+setup_data <- prepare_data(count = Y_genus, covariate = covariate_standa_df2)
+
+myPLN_full <- PLN(Abundance ~ precip * tmax * ndvi , data =  setup_data,control = PLN_param(covariance = c("full")))
+myPLN_sphere <- PLN(Abundance ~ precip * tmax * ndvi , data =  setup_data,control = PLN_param(covariance = c("spherical")))
+myPLN_diag <- PLN(Abundance ~ precip * tmax * ndvi , data =  setup_data,control = PLN_param(covariance = c("diagonal")))
+myPLN_full_addit <- PLN(Abundance ~ precip + tmax + ndvi , data =  setup_data,control = PLN_param(covariance = c("full")))
+myPLN_full_LD <- PLN(Abundance ~ precip * tmax * ndvi +land_degra, data =  setup_data,control = PLN_param(covariance = c("full")))
+myPLN_full_C <- PLN(Abundance ~ precip * tmax * ndvi + Cluster, data =  setup_data,control = PLN_param(covariance = c("full")))
+myPLN_full_LDC <- PLN(Abundance ~ precip * tmax * ndvi + Cluster +land_degra, data =  setup_data,control = PLN_param(covariance = c("full")))
+rbind(
+  myPLN_full$criteria,
+  myPLN_sphere$criteria,
+  myPLN_diag$criteria,
+  myPLN_full_addit$criteria,
+  myPLN_full_C$criteria,
+  myPLN_full_LD$criteria,
+  myPLN_full_LDC$criteria
+) %>%
+  as.data.frame(row.names = c("full", "diagonal", "spherical", "additif","Cluster", "land_degra" ,"land_degra + Cluster")) %>%
+  knitr::kable()
+```
+
+
+```{r}
+Y_genus_filter <- Y_genus[!rownames(Y_genus)== "ROB_N9_s",]
+predicted_data <- matrix(NA, ncol = ncol(Y_genus_filter), nrow = nrow(Y_genus_filter))
+colnames(predicted_data) <- colnames(Y_genus_filter)
+rownames(predicted_data) <- rownames(Y_genus_filter)
+covariate_standa_df2_filter <- covariate_standa_df2[!rownames(covariate_standa_df2)== "ROB_N9_s",]
+
+setup_data <- prepare_data(count = Y_genus_filter, covariate = covariate_standa_df2_filter)
+
+setup = list(list(frml = formula("Abundance~ precip + tmax + ndvi"), covar = "diagonal"),
+             #list(frml = formula("Abundance~ precip * tmax * ndvi + land_degra"), covar = "diagonal"),
+             list(frml = formula("Abundance~ precip * tmax * ndvi + Cluster"), covar = "diagonal"),
+             list(frml = formula("Abundance~ precip * tmax * ndvi + land_degra + Cluster"), covar = "diagonal"),
+             list(frml = formula("Abundance~ precip + tmax + ndvi"), covar = "spherical"),
+             #list(frml = formula("Abundance~ precip * tmax * ndvi +land_degra"), covar = "spherical"),
+             list(frml = formula("Abundance~ precip * tmax * ndvi + Cluster"), covar = "spherical"),
+             list(frml = formula("Abundance~ precip * tmax * ndvi + land_degra + Cluster"), covar = "spherical"),
+             list(frml = formula("Abundance~ precip + tmax + ndvi"), covar = "full"),
+             #list(frml = formula("Abundance~ precip * tmax * ndvi +land_degra"), covar = "full"),
+             list(frml = formula("Abundance~ precip * tmax * ndvi + Cluster"), covar = "full"),
+             list(frml = formula("Abundance~ precip * tmax * ndvi + land_degra + Cluster"), covar = "full"))
+
+recap_df <- data.frame(mod = NA, RMSE =NA) 
+for(set in setup){
+  for(n in 1:nrow(Y_genus_filter)){
+    if(n != which(rownames(Y_genus) == "ROB_N9_s")){
+      setup_data_temp <- prepare_data(count = Y_genus[-n,], covariate = covariate_standa_df2[-n,])
+      myPLN <- PLN(set$frml, data =  setup_data_temp, control = PLN_param(covariance = set$covar))
+    
+      predicted_data[n,] <- predict(myPLN, setup_data[n,],type = "response")
+      }
+  }
+  
+  predicted_data_filter <- predicted_data[!rownames(predicted_data)== "ROB_N9_s",]
+ 
+  RMSE_mod <- data.frame(mod = paste(as.character(set$frml)[3],set$covar[[1]] ,sep =" | "), RMSE = sqrt(sum( (as.vector(Y_genus_filter) -    as.vector(predicted_data))^2)/length(as.vector(predicted_data))))
+  recap_df <- rbind(recap_df, RMSE_mod)
+}
+recap_df %>%
+  arrange(RMSE)
+```
+
+
+```{r}
+for(n in 1:nrow(Y_genus)){
+    setup_data_temp <- prepare_data(count = Y_genus[-n,], covariate = covariate_standa_df2[-n,])
+    myPLN <- PLN(Abundance~ precip * tmax * ndvi + land_degra + Cluster, data =  setup_data_temp,control = PLN_param(covariance = "full"))
+  
+    predicted_data[n,] <- predict(myPLN, setup_data[n,],type = "response")
+}
+
+data.frame(
+  fitted   = as.vector(predicted_data),
+  observed = as.vector(Y_genus)
+) %>% 
+  ggplot(aes(x = observed, y = fitted)) + 
+    geom_point(size = 4, alpha =.25 ) + 
+    geom_abline(slope = 1, size = 2) +
+    scale_x_log10() + 
+    scale_y_log10() + 
+    theme_bw() + annotation_logticks()
+
+predicted_data %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code, names_to = "genus",values_to = "predicted") -> predicted_data_long
+
+Y_genus %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code, names_to = "genus",values_to = "observed") -> observed_data_long
+
+predicted_data_long %>%
+  left_join(observed_data_long, by = join_by(genus == genus , Sample_code == Sample_code)) %>%
+  ggplot() +
+    #geom_point(aes(x = observed, y = predicted),size = 2, alpha =.75 ) + 
+    geom_text(aes(x = observed, y = predicted,label = Sample_code),size = 2, alpha =.75 ) + 
+    geom_smooth(aes(x = observed, y = predicted),size = 2, alpha =.75 ,method = "lm", se =F) + 
+    geom_abline(slope = 1) +
+    facet_wrap(~genus,scale = "free" )+
+    # scale_x_log10() + 
+    # scale_y_log10() + 
+    theme_bw() 
+fitted_data <- predict(myPLN_full_LDC) 
+colnames(fitted_data) <- colnames(Y_genus)
+rownames(fitted_data) <- rownames(Y_genus)
+fitted_data %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code, names_to = "genus",values_to = "fitted") -> fitted_data_long
+
+fitted_data_long %>%
+  left_join(observed_data_long, by = join_by(genus == genus , Sample_code == Sample_code)) %>%
+  ggplot() +
+    geom_point(aes(x = observed, y = fitted),size = 2, alpha =.75 ) + 
+    geom_abline(slope = 1) +
+    facet_wrap(~genus,scale = "free" )+
+    # scale_x_log10() + 
+    # scale_y_log10() + 
+    theme_bw() 
+```
+
+# SBM approach
+
+```{r}
+library(sbm)
+
+plotMyMatrix(as.matrix(Y_genus_bin))
+str(covariate_standa_df2)
+m_tmax <- matrix(covariate_standa_df2$tmax, nrow=nrow(Y_genus_bin), ncol=ncol(Y_genus_bin))
+m_ndvi <- matrix(covariate_standa_df2$ndvi, nrow=nrow(Y_genus_bin), ncol=ncol(Y_genus_bin))
+m_precip <- matrix(covariate_standa_df2$precip, nrow=nrow(Y_genus_bin), ncol=ncol(Y_genus_bin))
+myBipartiteSBM <- Y_genus_bin %>%
+  as.matrix %>%
+  estimateBipartiteSBM('bernoulli',
+                        estimOptions = list(plot = T),
+                        dimLabels = c(row = "sample", col = "genus"))
+
+plot(myBipartiteSBM, 'expected')
+
+genus_id = myBipartiteSBM$memberships[2]%>%
+  as.data.frame()%>%
+  rownames_to_column("id")%>%
+  mutate(id = as.numeric(id))%>%
+  arrange(genus)
+grid_id = myBipartiteSBM$memberships[1]%>%
+  as.data.frame()%>%
+  rownames_to_column("id")%>%
+  mutate(id = as.numeric(id))%>%
+  arrange(sample)
+
+temp<-as.matrix(predict(myBipartiteSBM)>=0.50) 
+temp[temp==T] <- 1
+temp[grid_id$id,genus_id$id]%>%
+  t()%>%
+  plotMyMatrix(dimLabels = c("Genus", "Sample"), plotOptions = list(rowNames = T,colNames = T))+
+  geom_hline(yintercept = abs(which(!duplicated(genus_id$genus))[-1]-nrow(genus_id)-1)+0.5, col ="red", linetype = 5)+
+  geom_vline(xintercept = which(!duplicated(grid_id$sample))[-1]-0.5, col = "red")+
+  
+  theme(legend.position = "right",
+        element_text(angle = 45, vjust = 1, hjust = 1, size = 0.1, face="italic"),
+        strip.text.x = element_text(colour = "gray", size=20, face ="italic"),
+        strip.text.y  = element_text(colour = "gray", size=20, face ="italic"),
+        axis.text.x =element_text( size = 8, face="italic"),
+        axis.text.y = element_text(size = 10,face="italic"),
+        strip.background = element_rect(fill="white"),
+        panel.border = element_rect(color = "black",  fill = NA))
+
+
+log1p(predicted_data)[grid_id$id,genus_id$id]%>%
+  t()%>%
+  plotMyMatrix(dimLabels = c("Genus", "Sample"), plotOptions = list(rowNames = T,colNames = T))+
+  geom_hline(yintercept = abs(which(!duplicated(genus_id$genus))[-1]-nrow(genus_id)-1)+0.5, col ="red", linetype = 5)+
+  geom_vline(xintercept = which(!duplicated(grid_id$sample))[-1]-0.5, col = "red")+
+  
+  theme(legend.position = "right",
+        element_text(angle = 45, vjust = 1, hjust = 1, size = 0.1, face="italic"),
+        strip.text.x = element_text(colour = "gray", size=20, face ="italic"),
+        strip.text.y  = element_text(colour = "gray", size=20, face ="italic"),
+        axis.text.x =element_text( size = 8, face="italic"),
+        axis.text.y = element_text(size = 10,face="italic"),
+        strip.background = element_rect(fill="white"),
+        panel.border = element_rect(color = "black",  fill = NA))
+
+log1p(predicted_data_hurdel)[grid_id$id,genus_id$id]%>%
+  t()%>%
+  plotMyMatrix(dimLabels = c("Genus", "Sample"), plotOptions = list(rowNames = T,colNames = T))+
+  geom_hline(yintercept = abs(which(!duplicated(genus_id$genus))[-1]-nrow(genus_id)-1)+0.5, col ="red", linetype = 5)+
+  geom_vline(xintercept = which(!duplicated(grid_id$sample))[-1]-0.5, col = "red")+
+  
+  theme(legend.position = "right",
+        element_text(angle = 45, vjust = 1, hjust = 1, size = 0.1, face="italic"),
+        strip.text.x = element_text(colour = "gray", size=20, face ="italic"),
+        strip.text.y  = element_text(colour = "gray", size=20, face ="italic"),
+        axis.text.x =element_text( size = 8, face="italic"),
+        axis.text.y = element_text(size = 10,face="italic"),
+        strip.background = element_rect(fill="white"),
+        panel.border = element_rect(color = "black",  fill = NA))
+mPredY_bin[grid_id$id,genus_id$id]%>%
+  t()%>%
+  plotMyMatrix(dimLabels = c("Genus", "Sample"), plotOptions = list(rowNames = T,colNames = T))+
+  geom_hline(yintercept = abs(which(!duplicated(genus_id$genus))[-1]-nrow(genus_id)-1)+0.5, col ="red", linetype = 5)+
+  geom_vline(xintercept = which(!duplicated(grid_id$sample))[-1]-0.5, col = "red")+
+  
+  theme(legend.position = "right",
+        element_text(angle = 45, vjust = 1, hjust = 1, size = 0.1, face="italic"),
+        strip.text.x = element_text(colour = "gray", size=20, face ="italic"),
+        strip.text.y  = element_text(colour = "gray", size=20, face ="italic"),
+        axis.text.x =element_text( size = 8, face="italic"),
+        axis.text.y = element_text(size = 10,face="italic"),
+        strip.background = element_rect(fill="white"),
+        panel.border = element_rect(color = "black",  fill = NA))
+predict(myBipartiteSBM)[grid_id$id,genus_id$id]%>%
+  t()%>%
+  plotMyMatrix(dimLabels = c("Genus", "Sample"), plotOptions = list(rowNames = T,colNames = T))+
+  geom_hline(yintercept = abs(which(!duplicated(genus_id$genus))[-1]-nrow(genus_id)-1)+0.5, col ="red", linetype = 5)+
+  geom_vline(xintercept = which(!duplicated(grid_id$sample))[-1]-0.5, col = "red")+
+  
+  theme(legend.position = "right",
+        element_text(angle = 45, vjust = 1, hjust = 1, size = 0.1, face="italic"),
+        strip.text.x = element_text(colour = "gray", size=20, face ="italic"),
+        strip.text.y  = element_text(colour = "gray", size=20, face ="italic"),
+        axis.text.x =element_text( size = 8, face="italic"),
+        axis.text.y = element_text(size = 10,face="italic"),
+        strip.background = element_rect(fill="white"),
+        panel.border = element_rect(color = "black",  fill = NA))
+as.matrix(Y_genus_bin)[grid_id$id,genus_id$id]%>%
+  t()%>%
+  plotMyMatrix(dimLabels = c("Genus", "Sample"), plotOptions = list(rowNames = T,colNames = T))+
+  geom_hline(yintercept = abs(which(!duplicated(genus_id$genus))[-1]-nrow(genus_id)-1)+0.5, col ="red", linetype = 5)+
+  geom_vline(xintercept = which(!duplicated(grid_id$sample))[-1]-0.5, col = "red")+
+  
+  theme(legend.position = "right",
+        element_text(angle = 45, vjust = 1, hjust = 1, size = 0.1, face="italic"),
+        strip.text.x = element_text(colour = "gray", size=20, face ="italic"),
+        strip.text.y  = element_text(colour = "gray", size=20, face ="italic"),
+        axis.text.x =element_text( size = 8, face="italic"),
+        axis.text.y = element_text(size = 10,face="italic"),
+        strip.background = element_rect(fill="white"),
+        panel.border = element_rect(color = "black",  fill = NA))
+```
+
+
+```{r}
+myBipartiteSBM_pois <- Y_genus %>%
+  as.matrix %>%
+  estimateBipartiteSBM('bernoulli',
+                        estimOptions = list(plot = T),
+                        dimLabels = c(row = "sample", col = "genus"))
+plot(myBipartiteSBM_pois)
+
+genus_id_pois = myBipartiteSBM_pois$memberships[2]%>%
+  as.data.frame()%>%
+  rownames_to_column("id")%>%
+  mutate(id = as.numeric(id))%>%
+  arrange(genus)
+grid_id_pois = myBipartiteSBM_pois$memberships[1]%>%
+  as.data.frame()%>%
+  rownames_to_column("id")%>%
+  mutate(id = as.numeric(id))%>%
+  arrange(sample)
+
+pred_abund_sbm <- round(exp(predict(myBipartiteSBM_pois))-1)
+
+log1p(pred_abund_sbm)[grid_id_pois$id,genus_id_pois$id]%>%
+  t()%>%
+  plotMyMatrix(dimLabels = c("Genus", "Sample"), plotOptions = list(rowNames = T,colNames = T))+
+  geom_hline(yintercept = abs(which(!duplicated(genus_id_pois$genus))[-1]-nrow(genus_id_pois)-1)+0.5, col ="red", linetype = 5)+
+  geom_vline(xintercept = which(!duplicated(grid_id_pois$sample))[-1]-0.5, col = "red")+
+  
+  theme(legend.position = "right",
+        element_text(angle = 45, vjust = 1, hjust = 1, size = 0.1, face="italic"),
+        strip.text.x = element_text(colour = "gray", size=20, face ="italic"),
+        strip.text.y  = element_text(colour = "gray", size=20, face ="italic"),
+        axis.text.x =element_text( size = 8, face="italic"),
+        axis.text.y = element_text(size = 10,face="italic"),
+        strip.background = element_rect(fill="white"),
+        panel.border = element_rect(color = "black",  fill = NA))
+
+setup_data_sbm <- prepare_data(count = pred_abund_sbm, covariate = covariate_standa_df2)
+
+predicted_data_pois <- matrix(NA, ncol = ncol(Y_genus), nrow = nrow(Y_genus))
+colnames(predicted_data_pois) <- colnames(Y_genus)
+rownames(predicted_data_pois) <- rownames(Y_genus)
+
+
+for(n in 1:nrow(pred_abund_sbm)){
+  setup_data_temp <- prepare_data(count = pred_abund_sbm[-n,], covariate = covariate_standa_df2[-n,])
+  myPLN <- PLN(Abundance ~ precip * tmax * ndvi, data =  setup_data_temp,control = PLN_param(covariance = c("diagonal")))
+
+  predicted_data_pois[n,] <- predict(myPLN, setup_data[n,],type = "response")
+}
+
+data.frame(
+  fitted   = as.vector(predicted_data_pois),
+  observed = as.vector(Y_genus)
+) %>% 
+  ggplot(aes(x = observed, y = fitted)) + 
+    geom_point(size = 4, alpha =.25 ) + 
+    geom_abline(slope = 1, size = 2) +
+    scale_x_log10() + 
+    scale_y_log10() + 
+    theme_bw() + annotation_logticks()
+
+predicted_data_hurdel %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code, names_to = "genus",values_to = "predicted") -> predicted_data_long
+
+Y_genus %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code, names_to = "genus",values_to = "observed") -> observed_data_long
+
+predicted_data_long %>%
+  left_join(observed_data_long, by = join_by(genus == genus , Sample_code == Sample_code)) %>%
+  ggplot() +
+    geom_point(aes(x = observed, y = predicted),size = 2, alpha =.75 ) + 
+    geom_abline(slope = 1) +
+    facet_wrap(~genus )+
+    # scale_x_log10() + 
+    # scale_y_log10() + 
+    theme_bw() 
+
+```
+
+
+```{r}
 
 ```
 
 
 
+
 ```{r}
-Gradient <- prepareGradient(mod_pois, XDataNew = covariate_testing)
+mod_pois$XFormula
+Gradient <- constructGradient(mod_pois, focalVariable="tmax")
 predY <- stats::predict(m_converg, Gradient = Gradient)
 
-Gradient2 <- prepareGradient(m_bin, XDataNew = covariate_testing)
+Gradient2 <- prepareGradient(mod_bin, XDataNew = covariate_standa_df)
 predY2 <- stats::predict(m_converg_bin, Gradient = Gradient2)
-computePredictedValues
+
 EpredY <- predY[[1]]
 EpredY2 <- predY2[[1]]
 
@@ -981,11 +1381,11 @@ if (length(predY2) > 1) {
   }
   EpredY2 <- EpredY2 / length(predY2)
 }
-testing_samples
-rownames(EpredY) <- covariate_testing$Sample_code
-rownames(EpredY2) <- covariate_testing$Sample_code
 
+rownames(EpredY) <- covariate_standa_df$Sample_code
+rownames(EpredY2) <- covariate_standa_df$Sample_code
 
+plotGradient(mod_pois, Gradient, pred=predY, measure="Y",index = 27, showData = TRUE, jigger = 0.2)
 ```
 
 ```{r}
@@ -1022,22 +1422,7 @@ abund_test_df %>%
 ```
 
 
-# SBM approach
 
-```{r}
-
-library(sbm)
-hist(Y_genus)
-hist(log(Y_genus_trucated[!is.na(Y_genus_trucated)]))
-plotMyMatrix(log1p(Y_genus))
-
-myBipartiteSBM <-
-  estimateBipartiteSBM(log1p(Y_genus), 'poisson', estimOptions = list(plot = T))
-estimateMultipartiteSBM()
-plot(myBipartiteSBM, 'expected')
-myBipartiteSBM$expectation %>% exp() %>% hist()
-plot(myBipartiteSBM)
-```
 
 ```{r}
 covariate_df$weight = 2
