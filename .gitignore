@@ -23,6 +23,7 @@
 *.gpkg
 *.sqlite
 *.html
+*.grib
 
 # History files
 .Rhistory
