@@ -118,6 +118,31 @@ rasters <- stack(files)
 t_min_mean <- calc(rasters, mean, na.rm = TRUE)
 plot(t_min_mean)
 ```
+## Wind
+
+```{r}
+wind_rast <- rast("data/raster/wind_speed/data.grib")
+
+start_date <- as.Date("2022-06-01")
+end_date   <- as.Date("2023-05-01")
+r_time <- as.Date(time(wind_rast))
+# Subset by time
+wind_rast_sub <- wind_rast[[which(r_time >= start_date & r_time <= end_date)]]
+wind_2023 <- mean(wind_rast_sub)
+wind_2023 <- raster(wind_2023)
+plot(wind_rast_sub)
+plot(wind_2023)
+
+```
+## Wind
+
+```{r}
+elevation_rast <- raster("data/raster/wc2.1_2.5m_elev/wc2.1_2.5m_elev.tif")
+
+plot(elevation_rast)
+
+```
+
 
 ```{r}
 library(sf)
@@ -250,6 +275,27 @@ if(file.exists("outputs/raster/land_cover_lower_res.tif")){
   foreign::write.dbf(levels(land_cover_resampled)[[1]], file = "outputs/raster/land_cover_lower_res.tif.vat.dbf")
 }
 rasterVis::levelplot(cluster_agro_lower_res,par.settings = myTheme3)
+
+if(file.exists("outputs/raster/wind_2023.tif")){
+  wind_2023_final <- raster("outputs/raster/wind_2023.tif")
+  }else{
+  wind_2023_resampled <- raster::resample(wind_2023, land_degradation_lower_res, method = "ngb")
+  wind_2023_final <- mask(wind_2023_resampled, land_degradation_lower_res)
+  writeRaster(wind_2023_final,"outputs/raster/wind_2023.tif",options=c('TFW=YES'), overwrite=TRUE)
+  }
+
+plot(wind_2023_final)
+
+
+if(file.exists("outputs/raster/wind_2023.tif")){
+  altitude_uganda <- raster("outputs/raster/altitude_uganda.tif")
+  }else{
+  elvation_resampled <- raster::resample(elevation_rast, land_degradation_lower_res, method = "ngb")
+  altitude_uganda <- mask(elvation_resampled, land_degradation_lower_res)
+  writeRaster(altitude_uganda,"outputs/raster/altitude_uganda.tif",options=c('TFW=YES'), overwrite=TRUE)
+  }
+
+plot(altitude_uganda)
 ```
 
 

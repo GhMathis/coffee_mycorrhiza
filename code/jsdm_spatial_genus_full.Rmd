@@ -19,6 +19,17 @@ library(pals)
 
 library(Hmsc)
 library(ape)
+
+main_theme = theme_minimal() +
+ theme(aspect.ratio = 1,
+        axis.text.x = element_text(colour = "black", size=13, face="italic",angle =45, vjust =1, hjust =1),
+        axis.text.y = element_text(colour = "black", size=13, face="italic"),
+        axis.title = element_text(colour = "black", size=12),
+        panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+        legend.title = element_text(colour = "black", size=12,
+                                    hjust =0.5),
+
+        legend.text = element_text(colour = "black", size=13))
 ```
 # Spatial covariate
 
@@ -239,6 +250,58 @@ leaflet() %>%
   )
 
 ```
+
+```{r}
+delta_t_uganda <- tmax_uganda_resampled -tmin_uganda_resampled
+
+tdelta_df <- raster::extract(delta_t_uganda, wgs84_coords)%>%
+ tibble(tdelta = .,
+    Sample_code  = wgs84_coords$Sample_code)
+tdelta_df %>% summary()
+leaflet() %>%
+  addTiles() %>%
+  addRasterImage(delta_t_uganda, opacity = 0.5)%>%
+    addLegend(
+    "bottomright",
+    pal = pal_t,
+    values = c(9, 12),
+  )
+```
+
+```{r echo=FALSE}
+wind_2023 <- raster("outputs/raster/wind_2023.tif")
+pal_wind <- colorNumeric("Spectral", domain = c(0, 4))
+wind_df <- raster::extract(wind_2023, wgs84_coords)%>%
+ tibble(wind = .,
+    Sample_code  = wgs84_coords$Sample_code)
+leaflet() %>%
+  addTiles() %>%
+  addRasterImage(wind_2023, opacity = 0.5)%>%
+    addLegend(
+    "bottomright",
+    pal = pal_wind,
+    values = c(0, 4),
+  )
+
+```
+
+```{r echo=FALSE}
+altitude_uganda <- raster("outputs/raster/altitude_uganda.tif")
+pal_alt <- colorNumeric("Spectral", domain = c(0, 4500))
+altidute_df <- raster::extract(altitude_uganda, wgs84_coords)%>%
+ tibble(altitude = .,
+    Sample_code  = wgs84_coords$Sample_code)
+leaflet() %>%
+  addTiles() %>%
+  addRasterImage(altitude_uganda, opacity = 0.5)%>%
+    addLegend(
+    "bottomright",
+    pal = pal_alt,
+    values = c(0, 4),
+  )
+
+```
+
 ## Agroecological zone
 
 ```{r echo=FALSE}
@@ -248,7 +311,10 @@ wgs84_coords %>%
   left_join(ndvi_df, by = "Sample_code") %>%
   left_join(precip_df, by = "Sample_code") %>%
   left_join(tmax_df, by = "Sample_code") %>%
-  left_join(tmin_df, by = "Sample_code") -> wgs84_coords
+  left_join(tmin_df, by = "Sample_code") %>%
+  left_join(tdelta_df, by ="Sample_code") %>%
+  left_join(wind_df, by ="Sample_code") %>%
+  left_join(altidute_df, by ="Sample_code")-> wgs84_coords
 
 ```
 
@@ -311,7 +377,7 @@ leaflet(wgs84_coords) %>%
 # Joint species distribution models at the genus level
 
 ```{r echo=FALSE}
-amf_genus_rare <- read.table("outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.rarefy.Glomeromycota_genus.txt", header = TRUE, stringsAsFactors = FALSE)
+amf_genus_rare <- read.table("outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.amf_genus_decont2.txt", header = TRUE, stringsAsFactors = FALSE)
 genus_tree <- read.tree("outputs/phylo_tree/Robust_MiSeq_18S_AMf_20241120_125_samples_Eukaryome_Glomeromycota_genus.tree")
 
 # Inspect and root tree
@@ -368,19 +434,37 @@ genus_matrix_samples <- rownames(Y_genus)
 ## Covariates
 
 ```{r}
+library(GGally)
+library(FactoMineR)
 covariate_df <- wgs84_coords %>%
   as.data.frame() %>%
   mutate(Sample_code = str_c("ROB_", Sample_code, "_s")) %>%
   filter(Sample_code %in% genus_matrix_samples) %>%
-  dplyr::select(-geometry) %>%
-  mutate(
-    across(where(is.character), ~ as.factor(.x)),
-    Cluster = factor(Cluster, levels = unique(Cluster)),
-    land_degra = factor(land_degra, levels = c("Low", "Medium", "High"))
-  )
+  dplyr::select(Sample_code,ndvi, precip, tmax, tmin,tdelta, wind, altitude,Altitude)
 
+covariate_df %>%
+  dplyr::filter(Sample_code %in% rownames(Y_genus)) %>%
+  dplyr::slice(match(rownames(Y_genus), Sample_code)) %>%
+  column_to_rownames("Sample_code") %>%
+  mutate(across(where(is.numeric), ~vegan::decostand(.x, method = "standardize")[,1])) %>%
+  rownames_to_column("Sample_code") -> covariate_standa_df
 # write.table(covariate_df, "outputs/covariate_table.txt")
 
+covariate_standa_df %>%
+  select(-Sample_code) %>%
+  ggpairs(progress = F)
+
+covariate_standa_df %>%
+  select(-Sample_code) %>%
+  PCA()
+
+covariate_standa_df %>%
+  select(ndvi, precip, tmin, tdelta, wind) %>%
+  ggpairs(progress = F)
+
+covariate_standa_df %>%
+  select(ndvi, precip, tmin, tdelta, wind) %>%
+  PCA()
 ```
 
 # test residuals
@@ -389,15 +473,6 @@ covariate_df <- wgs84_coords %>%
 library(glmmTMB)
 library(DHARMa)
 library(purrr)
-library(GGally)
-Y_genus[,3] # model do not converge
-Y_genus_temp <- Y_genus[,-3]
-
-wgs84_coords %>%
-  as.data.frame() %>%
-  select(ndvi, precip, tmax) %>%
-
-  ggpairs()
 
 # compute.glm <- function(Y, Xdf, x){
 #   if(sum(Y == 0) >3  & !(x %in% c(3,5,20,26,9,10,13,18,24,27,28))){
@@ -423,27 +498,129 @@ wgs84_coords %>%
 #   }
 # }
 
-1:ncol(Y_genus_temp) %>%
-  map(\(x) glmmTMB(Y_genus_temp[,x]~ land_degra + ndvi + precip + tmax,
-                     data = covariate_df,
-                     family = nbinom1))-> model_list #compute.glm(Y = Y_genus_temp[,x],
+1:ncol(Y_genus) %>%
+  map(\(x) glmmTMB(Y_genus[,x]~  ndvi + precip + tmin + tdelta + wind + (1|Sample_code),
+                      data = covariate_standa_df,
+                      #ziformula = ~1,
+                      family = poisson))-> model_list #compute.glm(Y = Y_genus_temp[,x],
                    #Xdf = covariate_df, x=x)) -> model_list
-covariate_df %>%
-  as.data.frame() %>%
-  select(lon, lat) %>%
-  duplicated() -> dup_id
+# covariate_standa_df %>%
+#   as.data.frame() %>%
+#   select(lon, lat) %>%
+#   duplicated() -> dup_id
+# 
+# covariate_df[dup_id,]$lat = covariate_df[dup_id,]$lat +0.001
+# covariate_df[dup_id,]$lon = covariate_df[dup_id,]$lon +0.001
 
-covariate_df[dup_id,]$lat = covariate_df[dup_id,]$lat +0.001
-covariate_df[dup_id,]$lon = covariate_df[dup_id,]$lon +0.001
-
-for(i in 1:ncol(Y_genus_temp)){
-  res <- DHARMa::simulateResiduals(model_list[[i]], plot = T)
+str(Y_genus)
+for(i in 1:ncol(Y_genus)){
+  res <- DHARMa::simulateResiduals(model_list[[i]], plot = F)
+  plot(res)
+  title(main = print(colnames(Y_genus)[i]))
   testZeroInflation(res)
-  length(wgs84_coords$lon)
-  res$nObs
-  testSpatialAutocorrelation(res, x = covariate_df$lon, y = covariate_df$lat )
+  #testSpatialAutocorrelation(res, x = covariate_df$lon, y = covariate_df$lat )
 }
+```
 
+
+```{r}
+Y_genus %>%
+  as.data.frame() %>%
+  mutate(across(names(distribution_res)[distribution_res == "poisson" |names(distribution_res) == "Viscospora (5 OTU)"], ~log1p(.x))) -> Y_genus_transform
+distribution_res[failed_genus]
+# distribution_res <- list(
+#   "Sclerocarpum (4 OTU)" = "poisson",
+#   "Glomeraceae_gen05 (4 OTU)" = "poisson",
+#   "Glomeraceae_gen03 (4 OTU)" = "poisson",
+#   "Glomeraceae_gen27 (6 OTU)" = "nbinom1",
+#   "Rhizoglomus (31 OTU)" = "nbinom1",
+#   "Silvaspora (10 OTU)" = "poisson",
+#   "Sclerocystis (52 OTU)" = "nbinom1", # zif
+#   "Nanoglomus (128 OTU)" = "nbinom1",
+#   "Glomeraceae_gen11 (7 OTU)" = "poisson",
+#   "Dominikia (43 OTU)" = "nbinom1" ,
+#   "Glomeraceae_gen14 (4 OTU)" = "poisson",
+#   "Microdominikia (11 OTU)" = "poisson",
+#   "Septoglomus (16 OTU)" = "nbinom1", #zif
+#   "Viscospora (5 OTU)" = "nbinom1", # log1p
+#   "Funneliformis (2 OTU)" = "poisson",
+#   "Pervetustus (2 OTU)" = "poisson",
+#   "Unknown Archaeosporomycetes (4 OTU)" = "poisson",
+#   "Unknown cl01 (27 OTU)" = "poisson",
+#   "Unknown Glomeromycota (6 OTU)" = "poisson",
+#   "Paraglomus (7 OTU)" = "poisson",
+#   "Entrophospora (40 OTU)" = "nbinom1" ,
+#   "Diversispora (21 OTU)" = "nbinom1",
+#   "Unknown Diversisporaceae (2 OTU)" = "poisson",
+#   "Redeckera (13 OTU)" = "poisson",
+#   "Cetraspora (3 OTU)" = "poisson",
+#   "Unknown Racocetraceae (4 OTU)" = "poisson",
+#   "Unknown Gigasporales (6 OTU)" = "poisson",
+#   "Dentiscutata (4 OTU)" = "nbinom1",
+#   "Unknown Dentiscutataceae (2 OTU)" = "poisson",
+#   "Fuscutata (6 OTU)" = "poisson",
+#   "Gigaspora (14 OTU)" = "nbinom1",
+#   "Scutellospora (2 OTU) " = "nbinom1",
+#   "Acaulospora (88 OTU)" = "nbinom1",
+#   "Unknown Glomeraceae (120 OTU)" = "nbinom1"
+# )
+distribution_res <- list(
+  "Sclerocarpum (4 OTU)" = "poisson",
+  "Glomeraceae_gen05 (4 OTU)" = "poisson",
+  "Glomeraceae_gen03 (4 OTU)" = "poisson",
+  "Glomeraceae_gen27 (6 OTU)" = "poisson",
+  "Rhizoglomus (31 OTU)" = "poisson",
+  "Silvaspora (10 OTU)" = "poisson",
+  "Sclerocystis (52 OTU)" = "poisson", # zif
+  "Nanoglomus (128 OTU)" = "nbinom1",
+  "Glomeraceae_gen11 (7 OTU)" = "poisson",
+  "Dominikia (43 OTU)" = "nbinom1" ,
+  "Glomeraceae_gen14 (4 OTU)" = "poisson",
+  "Microdominikia (11 OTU)" = "poisson",
+  "Septoglomus (16 OTU)" = "nbinom1", #zif
+  "Viscospora (5 OTU)" = "poisson", # log1p
+  "Funneliformis (2 OTU)" = "poisson",
+  "Pervetustus (2 OTU)" = "poisson",
+  "Unknown Archaeosporomycetes (4 OTU)" = "poisson",
+  "Unknown cl01 (27 OTU)" = "poisson",
+  "Unknown Glomeromycota (6 OTU)" = "poisson",
+  "Paraglomus (7 OTU)" = "poisson",
+  "Entrophospora (40 OTU)" = "poisson" ,
+  "Diversispora (21 OTU)" = "poisson",
+  "Unknown Diversisporaceae (2 OTU)" = "poisson",
+  "Redeckera (13 OTU)" = "poisson",
+  "Cetraspora (3 OTU)" = "poisson",
+  "Unknown Racocetraceae (4 OTU)" = "poisson",
+  "Unknown Gigasporales (6 OTU)" = "poisson",
+  "Dentiscutata (4 OTU)" = "poisson",
+  "Unknown Dentiscutataceae (2 OTU)" = "poisson",
+  "Fuscutata (6 OTU)" = "poisson",
+  "Gigaspora (14 OTU)" = "poisson",
+  "Scutellospora (2 OTU)" = "poisson",
+  "Acaulospora (88 OTU)" = "poisson",
+  "Unknown Glomeraceae (120 OTU)" = "poisson"
+)
+1:ncol(Y_genus) %>%
+  map(\(x) glmmTMB(Y_genus[,x]~  ndvi + precip + tmin + tdelta + wind + (1|Sample_code),
+                      data = covariate_standa_df,
+                      #ziformula = ~1,
+                      family = distribution_res[[x]]))-> model_list #compute.glm(Y = Y_genus_temp[,x],
+                   #Xdf = covariate_df, x=x)) -> model_list
+# covariate_standa_df %>%
+#   as.data.frame() %>%
+#   select(lon, lat) %>%
+#   duplicated() -> dup_id
+# 
+# covariate_df[dup_id,]$lat = covariate_df[dup_id,]$lat +0.001
+# covariate_df[dup_id,]$lon = covariate_df[dup_id,]$lon +0.001
+
+for(i in 1:ncol(Y_genus)){
+  res <- DHARMa::simulateResiduals(model_list[[i]], plot = F)
+  plot(res)
+  title(main = print(colnames(Y_genus)[i]))
+  testZeroInflation(res)
+  #testSpatialAutocorrelation(res, x = covariate_df$lon, y = covariate_df$lat )
+}
 ```
 
 
@@ -462,30 +639,73 @@ if (test.run){
   #with this option, the vignette evaluates slow but it reproduces the results of the
   #.pdf version
   thin = 5
-  samples = 250
+  samples = 1000
   transient = 1000*thin
   verbose = 1000*thin
 }
-studyDesign <- data.frame(sample = rownames(Y_genus_trucated), stringsAsFactors = TRUE)
+studyDesign <- data.frame(sample = rownames(Y_genus), stringsAsFactors = TRUE)
 rL <- HmscRandomLevel(units = studyDesign$sample)
 
-
-covariate_df %>%
-  select(Cluster, land_degra, ndvi, precip, tmax,Sample_code) %>% 
-  dplyr::filter(Sample_code %in% rownames(Y_genus)) %>%
-  dplyr::slice(match(rownames(Y_genus), Sample_code)) %>%
-  column_to_rownames("Sample_code") %>%
-  mutate(across(where(is.numeric), ~vegan::decostand(.x, method = "standardize")[,1])) -> covariate_standa_df
+distribution_res_hmsc <-c(
+  "Sclerocarpum (4 OTU)" = "poisson",
+  "Glomeraceae_gen05 (4 OTU)" = "poisson",
+  "Glomeraceae_gen03 (4 OTU)" = "poisson",
+  "Glomeraceae_gen27 (6 OTU)" = "poisson",
+  "Rhizoglomus (31 OTU)" = "poisson", 
+  "Silvaspora (10 OTU)" = "poisson",
+  "Sclerocystis (52 OTU)" = "poisson", # zif
+  "Nanoglomus (128 OTU)" = "poisson", 
+  "Glomeraceae_gen11 (7 OTU)" = "poisson",
+  "Dominikia (43 OTU)" = "poisson" , 
+  "Glomeraceae_gen14 (4 OTU)" = "poisson", 
+  "Microdominikia (11 OTU)" = "poisson",
+  "Septoglomus (16 OTU)" = "poisson", #zif
+  "Viscospora (5 OTU)" = "poisson", # log1p
+  "Funneliformis (2 OTU)" = "poisson",
+  "Pervetustus (2 OTU)" = "poisson",
+  "Unknown Archaeosporomycetes (4 OTU)" = "poisson",
+  "Unknown cl01 (27 OTU)" = "poisson",
+  "Unknown Glomeromycota (6 OTU)" = "poisson",
+  "Paraglomus (7 OTU)" = "poisson",
+  "Entrophospora (40 OTU)" = "poisson" , 
+  "Diversispora (21 OTU)" = "poisson", 
+  "Unknown Diversisporaceae (2 OTU)" = "poisson",
+  "Redeckera (13 OTU)" = "poisson",
+  "Cetraspora (3 OTU)" = "poisson",
+  "Unknown Racocetraceae (4 OTU)" = "poisson",
+  "Unknown Gigasporales (6 OTU)" = "poisson",
+  "Dentiscutata (4 OTU)" = "poisson",
+  "Unknown Dentiscutataceae (2 OTU)" = "poisson",
+  "Fuscutata (6 OTU)" = "poisson",
+  "Gigaspora (14 OTU)" = "poisson", 
+  "Scutellospora (2 OTU)" = "poisson", 
+  "Acaulospora (88 OTU)" = "poisson", 
+  "Unknown Glomeraceae (120 OTU)" = "poisson"
+)
 
 ```
 
 
 ```{r echo=FALSE}
+
+Y_genus %>% 
+  rowSums %>% 
+  as.data.frame() %>%
+  rename(readscount = ".") %>%
+  rownames_to_column("Sample_code") -> readscount_df
+
+covariate_standa_df %>%
+  left_join(readscount_df, by = "Sample_code") %>%
+  mutate(Sample_code = as.factor(Sample_code)) -> covariate_standa_df
+```
+
+
+```{r echo=FALSE}
 mod_pois <- Hmsc(
-  Y = Y_genus,
+  Y = Y_genus_trucated,
   XData = covariate_standa_df,
-  XFormula = ~ ndvi + precip + tmax,
-  #phyloTree = genus_tree_filter,
+  XFormula = ~poly(ndvi,2) + poly(precip,2) + poly(tmin,2) + poly(tdelta,2) + poly(wind,2) + log(readscount),
+  phyloTree = genus_tree_filter,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
   distr = "lognormal poisson"
@@ -493,7 +713,7 @@ mod_pois <- Hmsc(
 
 m_converg <- sampleMcmc(
   mod_pois,
-  thin = thin, samples = samples, transient = transient,
+  thin = 15, samples = samples, transient = transient,
   nChains = nChains, verbose = verbose, nParallel = 14
 )
 # save(m_converg, file = "outputs/hmsc_genus_full.Rdata")
@@ -515,7 +735,7 @@ Y_genus_bin <- Y_genus_trucated %>%
 mod_bin <- Hmsc(
   Y = Y_genus_bin,
   XData = covariate_standa_df,
-  XFormula = ~ ndvi + precip + tmax,
+  XFormula = ~ (ndvi + precip + tmin + tdelta + wind)^2,
   #phyloTree = genus_tree_filter,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
@@ -538,16 +758,13 @@ mpost2 <- convertToCodaObject(m_converg)
 gelman.diag(mpost2$Beta, multivariate = FALSE) -> gelman_diag_df2
 gelman_diag_df2$psrf
 
-postBeta_bin2 <- getPostEstimate(m_converg_bin, parName = "Beta")
-mpost_bin2 <- convertToCodaObject(m_converg_bin)
-gelman.diag(mpost_bin2$Beta, multivariate = FALSE) -> gelman_diag_bin_df2
-gelman_diag_bin_df2$psrf
+
 
 beta_results <- postBeta2$mean
 rownames(beta_results) <- colnames(m_converg$X)
 beta_results <- beta_results * ((postBeta2$support > 0.9) + (postBeta2$support < (1 - 0.9)) > 0)
 beta_results <- t(beta_results)[genus_tree_filter$tip.label, colnames(m_converg$X)]
-colnames(beta_results) <- c("Intercept","NDVI", "Rain", "tmax") #  "Cluster B", "Cluster C", "Cluster E", "LD Medium", "LD High", 
+#colnames(beta_results) <- c("Intercept","NDVI", "Rain", "tmin", "tdelta", "wind") #  "Cluster B", "Cluster C", "Cluster E", "LD Medium", "LD High", 
 
 ```
 ## Models results
@@ -575,13 +792,16 @@ gheatmap(p, beta_results, offset = 1, width = 1, font.size = 5,
 Response of occurrences :
 
 ```{r echo=FALSE}
-
+postBeta_bin2 <- getPostEstimate(m_converg_bin, parName = "Beta")
+mpost_bin2 <- convertToCodaObject(m_converg_bin)
+gelman.diag(mpost_bin2$Beta, multivariate = FALSE) -> gelman_diag_bin_df2
+gelman_diag_bin_df2$psrf
 # Binary betas
 beta_bin_results <- postBeta_bin2$mean
 rownames(beta_bin_results) <- colnames(m_converg_bin$X)
 beta_bin_results <- beta_bin_results * ((postBeta_bin2$support > 0.9) + (postBeta_bin2$support < (1 - 0.9)) > 0)
 beta_bin_results <- t(beta_bin_results)[genus_tree_filter$tip.label, colnames(m_converg_bin$X)]
-colnames(beta_bin_results) <- c("Intercept","NDVI", "Rain", "tmax")
+#colnames(beta_bin_results) <- c("Intercept","NDVI", "Rain", "tmax")
 
 p_bin <- ggtree(genus_tree_filter, layout = "roundrect") +
   geom_tiplab(align = TRUE) +
@@ -619,7 +839,7 @@ library(purrr)
 # ------------------------------------------------------------------
 # Compute Pagel's lambda for each covariate via nlme gls + corPagel
 # ------------------------------------------------------------------
-models <- list(abund = m_converg, bin = m_converg_bin)
+models <- list(abund = m_converg) # , bin = m_converg_bin
 
 compute.padgel.lambda <- function(models, i) {
   m <- models[[i]]
@@ -652,7 +872,7 @@ compute.padgel.lambda <- function(models, i) {
 
 any(branching.times(genus_tree_filter) == 0)
 
-c("abund", "bin") %>%
+c("abund") %>%#, "bin"
   purrr::map(\(x) compute.padgel.lambda(models, x)) %>%
   list_rbind() -> lambda_df
 
@@ -705,7 +925,7 @@ VP2 <- computeVariancePartitioning(m_converg, na.ignore = TRUE)
 VP2$vals %>%
   as.data.frame() %>%
   rownames_to_column("var") %>%
-  mutate(var = factor(var, levels = c("Cluster", "land_degra", "ndvi", "precip", "tmax", "Random: sample"))) %>%
+  #mutate(var = factor(var, levels = c("ndvi", "precip", "tmin", "tdelta", "wind", "Random: sample"))) %>%
   pivot_longer(-var) %>%
   ggplot() +
   geom_col(aes(x = name, y = value, fill = var)) +
@@ -732,7 +952,7 @@ VP_bin2 <- computeVariancePartitioning(m_converg_bin, na.ignore = TRUE)
 VP_bin2$vals %>% 
   as.data.frame() %>%
   rownames_to_column("var") %>%
-  mutate(var = factor(var, levels = c("Cluster", "land_degra", "ndvi", "precip", "tmax", "Random: sample"))) %>%
+  #mutate(var = factor(var, levels = c("Cluster", "land_degra", "ndvi", "precip", "tmax", "Random: sample"))) %>%
   pivot_longer(-var) %>%
   ggplot() +
   geom_col(aes(x = name, y = value, fill = var)) +
@@ -783,19 +1003,40 @@ corrplot(toPlot_bin, method = "color", col = colorRampPalette(c("blue", "white",
          mar = c(0, 0, 1, 0), order = "hclust")
 ```
 
+
+
 ```{r}
-partition = createPartition(m_converg, nfolds = 10, column = "sample")
-m_converg$Y
-preds_pois = computePredictedValues(m_converg, partition = partition, thin = thin, nParallel = 14)
+
+partition = createPartition(m_converg, nfolds = 5, column = "sample")
+#preds_pois = computePredictedValues(m_converg, partition = partition, thin = thin, nParallel = 14)
+
+
+preds_expl = computePredictedValues(m_converg, thin = thin, nParallel = 14)
+MF_expl = evaluateModelFit(hM = m_converg, predY = preds_expl) 
+mean(MF_expl$RMSE)
+#Predictive power based on cross-validation  
+preds_pred =computePredictedValues(m_converg, partition = partition, thin = thin, nParallel = 14)
+MF_pred = evaluateModelFit(hM = m_converg, predY = preds_pred)
+
+#Predictive power based on conditional cross-validation 
+
+partition.sp = c(rep(1,11),rep(2,11),rep(3,12))
+preds_condi_pred = computePredictedValues(m_converg, partition = partition, partition.sp = partition.sp, thin = thin, nParallel = 14, mcmcStep = 100) 
+MF_condi_pred = evaluateModelFit(hM = m_converg, predY = preds_condi_pred) 
+str(preds_condi_pred)
+mean(MF_condi_pred$RMSE)
 # save(preds_pois, file = "outputs/pred_pois_10fold_genus.RData")
 # load("outputs/pred_pois_10fold_genus.RData")
 
 MF_pois = evaluateModelFit(hM = m_converg, predY = preds_pois)
-mPredY_pois <- apply(abind::abind(preds_pois, along = 3), c(1, 2), matrixStats::mean2)
+
+mPredY_pois <- apply(abind::abind(preds_expl, along = 3), c(1, 2), matrixStats::mean2)
 
 colnames(mPredY_pois) <- colnames(m_converg$Y)
 rownames(mPredY_pois) <- rownames(m_converg$Y)
 
+
+# 
 preds_bin = computePredictedValues(m_converg_bin, partition = partition, thin = thin, nParallel = 12)
 # save(preds_bin, file = "outputs/pred_bin_6fold_genus.RData")
 # load( "outputs/pred_bin_6fold_genus.RData")
@@ -806,6 +1047,9 @@ mPredY_bin <- apply(abind::abind(preds_bin, along = 3), c(1, 2), matrixStats::me
 
 colnames(mPredY_bin) <- colnames(m_converg_bin$Y)
 rownames(mPredY_bin) <- rownames(m_converg_bin$Y)
+MF_bin
+# MF_bin
+#load(".RData")
 ```
 
 ```{r}
@@ -861,20 +1105,19 @@ ggplot(data=df_roc_AUC) +
 
 ```{r}
 df_roc_AUC %>%
-  filter(TPR>0.95)
+  filter(TPR>0.75)
 df_roc_AUC %>%
-  filter(FPR<0.05)
+  filter(FPR<0.15)
 df_roc_AUC %>%
   filter(Accuracy>0.78)
-df_roc_AUC %>%
-  filter( FPR<0.1 )
+
 
 
 ```
 
 ```{r}
-occurence_mat <- mPredY_bin < 0.48	
-model_perf_genus<- MF_bin$AUC < 0.55
+occurence_mat <- mPredY_bin < 0.54	# No occurence if P < 0.53
+model_perf_genus<- MF_bin$AUC < 0.65 # AUC < 0.5 is worse than random
 model_perf_genus[is.na(model_perf_genus)] <- T
 occurence_mat[, model_perf_genus] <- F
 
@@ -883,19 +1126,20 @@ EpredY_hurdel[occurence_mat] <- 0
 ```
 
 ```{r}
+colnames(mPredY_pois) == colnames(Y_genus)
 # mPredY_pois %>%
 EpredY_hurdel %>%
     as.data.frame() %>%
-    rownames_to_column("soil_code") %>%
-    pivot_longer(-soil_code, names_to = "genus_names", values_to = "pred_abund") -> EpredY_long
-rowSums(EpredY_hurdel) %>% sort
+    rownames_to_column("Sample_code") %>%
+    pivot_longer(-Sample_code, names_to = "genus_names", values_to = "pred_abund") -> EpredY_long
+colnames(Y_genus)
 Y_genus %>%
   as.data.frame() %>%
-  rownames_to_column("soil_code") %>%
-  pivot_longer(-soil_code, names_to = "genus_names", values_to = "true_abund") -> test_samples_long
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code, names_to = "genus_names", values_to = "true_abund") -> test_samples_long
 
 EpredY_long %>%
-  left_join(test_samples_long, by = join_by(genus_names,soil_code)) -> abund_test_df
+  left_join(test_samples_long, by = join_by(genus_names,Sample_code)) -> abund_test_df
 
 abund_test_df %>%
   mutate(diff = true_abund - pred_abund) %>%
@@ -961,11 +1205,30 @@ abund_test_df %>%
 ```{r}
 abund_test_df %>%
   ggplot()+
-  facet_wrap(~genus_names, scale = "free") +
   geom_point(aes(true_abund,pred_abund)) +
+  geom_smooth(aes(true_abund, pred_abund), method = "lm") +
+  geom_abline(slope=1) +
+  scale_x_log10() +
+  scale_y_log10() +
   labs(x= "Observed abundances", y = "Predicted abudances")
 
+table((abund_test_df$pred_abund == 0)[(abund_test_df$true_abund==0)])
 
+abund_test_df %>%
+ # filter(!(genus_names %in% c("Glomeraceae_gen11 (7 OTU)", "Funneliformis (2 OTU)"))) %>%
+  ggplot()+
+  facet_wrap(~genus_names, scale = "free") +
+  geom_point(aes(true_abund,pred_abund)) +
+  #geom_point(aes(x=1,y=1)) +
+  #geom_smooth(aes(true_abund, pred_abund), method = "lm") +
+  geom_abline(slope=1) +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(x= "Observed abundances", y = "Predicted abudances")
+
+recap_df %>%
+  arrange(desc(ratio_RMSE_sd)) %>%
+  filter(ratio_RMSE_sd>100) %>% pull(genus_names)-> failed_genus
 recap_df %>%
   ggplot() +
   geom_point(aes(genus_names, ratio_RMSE_sd))
@@ -974,6 +1237,66 @@ recap_df %>%
   ggplot() +
   geom_point(aes(VP, RMSE))
 ```
+```{r}
+Y_genus %>% colnames
+abund_test_df %>%
+  left_join(covariate_standa_df%>%
+              pivot_longer(-Sample_code, names_to = "covariates_names", values_to ="covariates_values"), by = "Sample_code",relationship = "many-to-many") -> abund_covar_df
+
+abund_covar_df %>%
+  filter(genus_names %in% c("Acaulospora (88 OTU)" ,"Nanoglomus (128 OTU)", "Dominikia (43 OTU)", "Viscospora (5 OTU)", "Microdominikia (11 OTU)", "Funneliformis (2 OTU)", "Silvaspora (10 OTU)")) %>%
+  filter(!(true_abund ==0)) %>%
+  ggplot()+
+  geom_point(aes(covariates_values,true_abund)) +
+  geom_smooth(aes(covariates_values,true_abund), formula =y ~ poly(x, 2), method = "glm") +
+   geom_smooth(aes(covariates_values,true_abund), method = "glm", col ="forestgreen") +
+  facet_grid(col = vars(covariates_names), row =vars(genus_names), scale = "free") +
+  # scale_x_log10() +
+  #scale_y_log10() +
+  main_theme
+```
+
+```{r}
+recap_df %>%
+  arrange(desc(ratio_RMSE_sd)) %>%
+  filter(ratio_RMSE_sd>100) %>% pull(genus_names)-> failed_genus
+recap_df %>%
+  filter(!(genus_names %in% failed_genus)) %>%
+  ggplot() +
+  geom_point(aes(genus_names, ratio_RMSE_sd))+
+  scale_y_log10() +
+  main_theme
+
+recap_df %>%
+  filter(!(genus_names %in% failed_genus)) %>%
+  ggplot() +
+  geom_point(aes(VP, RMSE))+
+  main_theme
+abund_test_df %>%
+  filter(!(genus_names %in% failed_genus)) %>%
+  ggplot()+
+  geom_point(aes(true_abund,pred_abund)) +
+  geom_smooth(aes(true_abund, pred_abund), method = "lm") +
+  geom_abline(slope=1) +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(x= "Observed abundances", y = "Predicted abudances")+
+  main_theme
+
+abund_test_df %>%
+  filter(!(genus_names %in% failed_genus)) %>%
+  ggplot()+
+  facet_wrap(~genus_names, scale = "free") +
+  geom_point(aes(true_abund,pred_abund)) +
+  geom_point(aes(x=1,y=1)) +
+  #geom_smooth(aes(true_abund, pred_abund), method = "lm") +
+  geom_abline(slope=1) +
+  # scale_x_log10() +
+  # scale_y_log10() +
+  labs(x= "Observed abundances", y = "Predicted abudances")+
+  main_theme
+```
+
 ```{r}
 Y_genus %>%
   as.data.frame() %>%

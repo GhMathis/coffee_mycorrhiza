@@ -72,6 +72,7 @@ ndvi_mean_uganda <- ndvi_mean %>%
 plot(ndvi_mean_uganda)
 ```
 
+
 ## Save raster  
 
 ```{r}

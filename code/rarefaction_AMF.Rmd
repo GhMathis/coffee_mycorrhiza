@@ -89,7 +89,7 @@ amf_OTUs_decont %>%
 amf_OTUs_decont2 <- amf_OTUs_decont %>%
   #{{sample to exclude}}
   dplyr::select(starts_with("ROB"))%>%
-  dplyr::select(where(~ sum(.x) >= 10^3.9))
+  dplyr::select(where(~ sum(.x) >= 10^3.1))
 smallest_amf <- min(colSums(amf_OTUs_decont2))
 ```
 
@@ -402,6 +402,29 @@ ape::write.tree(phy = family_tree, file = "outputs/phylo_tree/Robust_MiSeq_18S_A
 ```
 
 # Abundance at genus level
+```{r}
+amf_OTUs_decont %>%
+  #{{sample to exclude}}
+  dplyr::select(where(~ ifelse(is.numeric(.x), sum(.x) >= 10^3.1, is.character(.x))))  %>%
+  unite(taxonomy, kingdom, phylum, class, order, family, genus, sep = "; ") %>%
+  dplyr::select(taxonomy, starts_with("ROB")) %>%
+  group_by(taxonomy)%>%
+  mutate(
+    genus = paste(str_extract(
+      taxonomy,"(g_[^;*]+$)|([a-z]_[^;*]+)(?=(;\\s*\\*|\\s*\\*|$))"), # If family isn't known agglomerate a the lower taxonomic level known
+      n(),sep="_")
+  ) %>%
+  ungroup() %>%
+  dplyr::select(-taxonomy) %>%
+  group_by(genus) %>%
+  summarise_all(sum) -> amf_genus_decont2
+
+
+amf_genus_decont2 %>%
+  column_to_rownames("genus") %>% colSums()
+
+write.table(amf_genus_decont2, "outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.amf_genus_decont2.txt")
+```
 
 ```{r}
 amf_OTUs_rare %>%
