@@ -121,6 +121,7 @@ plot(t_min_mean)
 ## Wind
 
 ```{r}
+library(terra)
 wind_rast <- rast("data/raster/wind_speed/data.grib")
 
 start_date <- as.Date("2022-06-01")
@@ -296,6 +297,13 @@ if(file.exists("outputs/raster/wind_2023.tif")){
   }
 
 plot(altitude_uganda)
+
+for(name in c("pH.tif", "clay.tif", "nitrogen.tif", "organic_carbone.tif", "sand.tif", "silt.tif")){
+  temp_rast <- raster(file.path("data/raster/soil_data/",name))
+  temp_resampled <- raster::resample(temp_rast, land_degradation_lower_res, method = "ngb")
+  temp_resampled <- mask(temp_resampled, land_degradation_lower_res)
+  writeRaster(temp_resampled,file.path("outputs/raster/",name),options=c('TFW=YES'), overwrite=TRUE)
+}
 ```
 
 

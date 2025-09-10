@@ -254,6 +254,30 @@ write.table(amf_OTUs_rare, "outputs/abundance_tables/Robust_MiSeq_18S_AMf_202411
 # Abundance at family level
 
 ```{r}
+amf_OTUs_decont %>%
+  #{{sample to exclude}}
+  dplyr::select(where(~ ifelse(is.numeric(.x), sum(.x) >= 10^3.1, is.character(.x))))  %>%
+  unite(taxonomy, kingdom, phylum, class, order, family, sep = "; ") %>%
+  dplyr::select(taxonomy, starts_with("ROB")) %>%
+  group_by(taxonomy)%>%
+  mutate(
+    family = paste(str_extract(
+      taxonomy,"(f_[^;*]+$)|([a-z]_[^;*]+)(?=(;\\s*\\*|\\s*\\*|$))"), # If family isn't known agglomerate a the lower taxonomic level known
+      n(),sep="_")
+  ) %>%
+  ungroup() %>%
+  dplyr::select(-taxonomy) %>%
+  group_by(family) %>%
+  summarise_all(sum)  -> amf_family_decont2
+
+
+amf_family_decont2 %>%
+  column_to_rownames("family") %>% colSums()
+
+write.table(amf_family_decont2, "outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.amf_family_decont2.txt")
+```
+
+```{r}
 
 amf_OTUs_rare %>%
   unite(taxonomy, kingdom, phylum, class, order, family, sep = "; ") %>%
