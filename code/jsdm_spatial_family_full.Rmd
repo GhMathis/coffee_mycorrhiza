@@ -490,7 +490,8 @@ covariate_df %>%
   dplyr::slice(match(rownames(Y_family), Sample_code)) %>%
   column_to_rownames("Sample_code") %>%
   mutate(across(where(is.numeric), ~vegan::decostand(.x, method = "standardize")[,1])) %>%
-  rownames_to_column("Sample_code") -> covariate_standa_df
+  rownames_to_column("Sample_code") %>%
+  mutate(Sample_code = as.factor(Sample_code)) -> covariate_standa_df
 # write.table(covariate_df, "outputs/covariate_table.txt")
 
 covariate_standa_df %>%
@@ -513,65 +514,14 @@ covariate_standa_df %>%
   filter(sand <= -4)
 
 covariate_standa_df %>%
-  filter(Sample_code != "ROB_M19_s") %>%
   select(ndvi, precip, tmax, tdelta, wind, OC, nitrogen,clay, pH, sand) %>%
+  ggpairs(progress = F)
+covariate_standa_df %>%
+  select(ndvi, precip, tmax, tdelta, wind) %>%
   ggpairs(progress = F)
 ```
 
-# test residuals
 
-```{r}
-library(glmmTMB)
-library(DHARMa)
-library(purrr)
-
-# compute.glm <- function(Y, Xdf, x){
-#   if(sum(Y == 0) >3  & !(x %in% c(3,5,20,26,9,10,13,18,24,27,28))){
-#     return(glmmTMB(Y~ land_degra + ndvi + precip + tmax,
-#                      data = Xdf,
-#                      family = nbinom1,
-#                      ziformula = ~land_degra + ndvi + precip + tmax))
-#     }
-#   if (x %in% c(3,5,20,26)){
-#     return(glmmTMB(Y~ land_degra + ndvi + precip + tmax,
-#                      data = Xdf,
-#                      family = gaussian))
-#     }
-#   if(sum(Y == 0) < 3  & !(x %in% c(3,5,20,26,9,10,13,18,24,27,28))){
-#     return(glmmTMB(Y~ land_degra + ndvi + precip + tmax,
-#                      data = Xdf,
-#                      family = poisson))
-#   }
-#   if(x %in% c(9,10,13,18,24,27,28)){
-#     return(glmmTMB(Y~ land_degra + ndvi + precip + tmax,
-#                      data = Xdf,
-#                      family = nbinom1))
-#   }
-# }
-
-1:ncol(Y_family) %>%
-  map(\(x) glmmTMB(Y_family[,x]~  ndvi + precip + tmin + tdelta + wind + (1|Sample_code),
-                      data = covariate_standa_df,
-                      #ziformula = ~1,
-                      family = nbinom1))-> model_list #compute.glm(Y = Y_family_temp[,x],
-                   #Xdf = covariate_df, x=x)) -> model_list
-# covariate_standa_df %>%
-#   as.data.frame() %>%
-#   select(lon, lat) %>%
-#   duplicated() -> dup_id
-# 
-# covariate_df[dup_id,]$lat = covariate_df[dup_id,]$lat +0.001
-# covariate_df[dup_id,]$lon = covariate_df[dup_id,]$lon +0.001
-
-str(Y_family)
-for(i in 1:ncol(Y_family)){
-  res <- DHARMa::simulateResiduals(model_list[[i]], plot = F)
-  plot(res)
-  title(main = print(colnames(Y_family)[i]))
-  testZeroInflation(res)
-  #testSpatialAutocorrelation(res, x = covariate_df$lon, y = covariate_df$lat )
-}
-```
 
 
 
@@ -594,15 +544,15 @@ if (test.run){
   transient = 1000*thin
   verbose = 1000*thin
 }
-covariate_standa_df %>%
-  filter(Sample_code != "ROB_M19_s")  -> covariate_standa_filter_df
-Y_family %>%
-  as.data.frame() %>%
-  rownames_to_column("Sample_code") %>%
-  filter(Sample_code != "ROB_M19_s") %>%
-  column_to_rownames("Sample_code") %>%
-  as.matrix() -> Y_family_filter
-studyDesign <- data.frame(sample = rownames(Y_family_filter), stringsAsFactors = TRUE)
+# covariate_standa_df %>%
+#   filter(Sample_code != "ROB_M19_s")  -> covariate_standa_filter_df
+# Y_family %>%
+#   as.data.frame() %>%
+#   rownames_to_column("Sample_code") %>%
+#   filter(Sample_code != "ROB_M19_s") %>%
+#   column_to_rownames("Sample_code") %>%
+#   as.matrix() -> Y_family_filter
+studyDesign <- data.frame(sample = rownames(Y_family), stringsAsFactors = TRUE)
 rL <- HmscRandomLevel(units = studyDesign$sample)
 
 
@@ -611,23 +561,23 @@ rL <- HmscRandomLevel(units = studyDesign$sample)
 
 ```{r echo=FALSE}
 
-Y_family_filter %>% 
-  rowSums %>% 
-  as.data.frame() %>%
-  rename(readscount = ".") %>%
-  rownames_to_column("Sample_code") -> readscount_df
-
-covariate_standa_filter_df %>%
-  left_join(readscount_df, by = "Sample_code") %>%
-  mutate(Sample_code = as.factor(Sample_code)) -> covariate_standa_filter_df
+# Y_family_filter %>% 
+#   rowSums %>% 
+#   as.data.frame() %>%
+#   rename(readscount = ".") %>%
+#   rownames_to_column("Sample_code") -> readscount_df
+# 
+# covariate_standa_filter_df %>%
+#   left_join(readscount_df, by = "Sample_code") %>%
+#   mutate(Sample_code = as.factor(Sample_code)) -> covariate_standa_filter_df
 ```
 
 
 ```{r echo=FALSE}
 mod_pois <- Hmsc(
-  Y = Y_family_filter,
-  XData = covariate_standa_filter_df,
-  XFormula = ~ndvi + precip + tmin + tdelta + wind + OC + nitrogen + clay + pH ,
+  Y = Y_family,
+  XData =  covariate_standa_df ,
+  XFormula = ~ndvi + precip + tmin + tdelta + wind,
   #phyloTree = family_tree_filter,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
@@ -635,9 +585,9 @@ mod_pois <- Hmsc(
 )
 
 mod_lognormal <- Hmsc(
-  Y = Y_family_filter,
-  XData = covariate_standa_filter_df,
-  XFormula = ~ ndvi + precip + tmin + tdelta + wind + OC + nitrogen + clay + pH ,
+  Y = Y_family,
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi + precip + tmin + tdelta + wind,
   #phyloTree = family_tree_filter,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
@@ -647,7 +597,7 @@ mod_lognormal <- Hmsc(
 mod_pois_poly <- Hmsc(
   Y = Y_family,
   XData = covariate_standa_df,
-  XFormula = ~ ~poly(ndvi,2) + poly(precip,2) + poly(tmin,2) + poly(tdelta,2) + poly(wind,2),
+  XFormula = ~poly(ndvi,2) + poly(precip,2) + poly(tmin,2) + poly(tdelta,2) + poly(wind,2),
   #phyloTree = family_tree_filter,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
@@ -657,7 +607,7 @@ mod_pois_poly <- Hmsc(
 mod_lognormal_poly <- Hmsc(
   Y = Y_family,
   XData = covariate_standa_df,
-  XFormula = ~ ~poly(ndvi,2) + poly(precip,2) + poly(tmin,2) + poly(tdelta,2) + poly(wind,2),
+  XFormula = ~poly(ndvi,2) + poly(precip,2) + poly(tmin,2) + poly(tdelta,2) + poly(wind,2),
   #phyloTree = family_tree_filter,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
@@ -666,7 +616,7 @@ mod_lognormal_poly <- Hmsc(
 
 mod_pois_interaction <- Hmsc(
   Y = Y_family,
-  XData = covariate_standa_df,
+  XData =  covariate_standa_df,
   XFormula = ~ (ndvi + precip + tmin + tdelta + wind)^2,
   #phyloTree = family_tree_filter,
   studyDesign = studyDesign,
@@ -684,12 +634,13 @@ mod_lognormal_interaction  <- Hmsc(
   distr = "lognormal poisson"
 )
 
-mod_list <- list(mod_pois, mod_lognormal)#, mod_pois_poly, mod_lognormal_poly, mod_pois_interaction, mod_lognormal_interaction)
+
+mod_list <- list(mod_pois, mod_lognormal, mod_pois_poly, mod_lognormal_poly, mod_pois_interaction, mod_lognormal_interaction)
 ```
 
 
 ```{r echo=FALSE}
-compute.hmsc <- function(hmsc_mod, nfold = 5, nChains = 12,   test.run = T){
+compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 12,   test.run = T){
 
   if (test.run){
     #with this option, the vignette runs fast but results are not reliable
@@ -707,16 +658,18 @@ compute.hmsc <- function(hmsc_mod, nfold = 5, nChains = 12,   test.run = T){
   }
   
   m_converg <- sampleMcmc(
-    mod_pois,
+    hmsc_mod,
     thin = thin, samples = samples, transient = transient,
     nChains = nChains, verbose = verbose, nParallel = nChains)
   
+  set.seed(92828)
   partition = createPartition(m_converg, nfolds = nfold, column = "sample")
   
   expl_power = computePredictedValues(m_converg, thin = thin, nParallel = nChains)
   MF_expl = evaluateModelFit(hM = m_converg, predY = expl_power) 
   
   #Predictive power based on cross-validation  
+
   pred_power = computePredictedValues(m_converg, partition = partition, thin = thin, nParallel = nChains)
   MF_pred = evaluateModelFit(hM = m_converg, predY = pred_power)
   
@@ -734,8 +687,9 @@ compute.hmsc <- function(hmsc_mod, nfold = 5, nChains = 12,   test.run = T){
 
 ```{r}
 library(purrr)
-1:2 %>%
+1:6 %>%
   purrr::map(\(x) compute.hmsc(mod_list[[x]], nfold = 5, nChains = 14,   test.run = F)) -> list_mods_crossvalidation
+
 ```
 
 ```{r}
@@ -758,13 +712,14 @@ extract.pred.power <- function(mod_crossvalidation, mod_ID){
   
   abund_df
 }
-
-1:2 %>%
+list_mods_crossvalidation[[1]]$hmsc_mod$XData
+list_mods_crossvalidation[[2]]$hmsc_mod$XData
+1:6 %>%
   purrr::map(\(x) extract.pred.power(list_mods_crossvalidation[[x]],mod_ID = x)) %>%
   bind_rows()-> mods_crossvalidation_df
 
 
-1:2 %>%
+1:6 %>%
   purrr::map(\(x) list_mods_crossvalidation[[x]][["MF_pred"]] %>%
                as.data.frame %>%
                mutate(family_names = colnames(Y_family),
@@ -778,25 +733,66 @@ extract.pred.power <- function(mod_crossvalidation, mod_ID){
               median_pred = median(pred_abund, na.rm = T),
               mean_pred = mean(pred_abund, na.rm = T),
               sd_pred = sd(pred_abund, na.rm = T)), by = join_by(family_names== family_names, mod_ID==mod_ID)) %>%
-  mutate(ratio_RMSE_sd = (RMSE)/sd_abund) -> recap_df
+  mutate(ratio_RMSE_sd = (RMSE)/sd_abund) -> recap_pred_df
+list_mods_crossvalidation[[1]][["MF_expl"]]
+
+1:6 %>%
+  purrr::map(\(x) list_mods_crossvalidation[[x]][["MF_expl"]] %>%
+               as.data.frame %>%
+               mutate(family_names = colnames(Y_family),
+                      mod_ID = x)) %>%
+  bind_rows()  -> recap_expl_df
 ```
 
 ```{r}
-recap_df %>%
+recap_expl_df %>%
+  group_by(mod_ID) %>%
+  summarise(mean_rmse = mean(RMSE)) %>%
   ggplot() +
-  geom_point(aes(family_names, ratio_RMSE_sd, col = as.factor(mod_ID))) +
+  geom_point(aes(mod_ID, mean_rmse)) +
+  scale_y_log10() +
   main_theme
 
-recap_df %>%
+recap_expl_df %>%
+  group_by(mod_ID) %>%
+  summarise(mean_rmse_expl = mean(RMSE)) %>%
+  left_join(recap_pred_df %>%
+    group_by(mod_ID) %>%
+    summarise(mean_rmse_pred = mean(RMSE)), by = "mod_ID") %>%
+  ggplot() +
+  geom_point(aes(mod_ID,mean_rmse_pred/mean_rmse_expl, col = as.factor(mod_ID)))+
+
+  scale_y_log10() +
+  scale_x_log10() 
+
+```
+
+```{r}
+recap_pred_df %>%
+  #filter(!(mod_ID %in% c(1,2,3,4))) %>%
+  ggplot() +
+  geom_point(aes(family_names, ratio_RMSE_sd, col = as.factor(mod_ID))) +
+    scale_y_log10() +
+  main_theme
+
+recap_pred_df %>%
+  #filter(!(mod_ID %in% c(1,2,3,4))) %>%
+  ggplot() +
+  geom_point(aes(family_names, RMSE, col = as.factor(mod_ID)), cex = 4) +
+  scale_y_log10() +
+  main_theme
+
+recap_pred_df %>%
+  #filter(!(mean_pred>5000 & mod_ID ==4 )) %>%
   ggplot() +
   geom_abline(slope=1) +
-  geom_point(aes(mean_abund, mean_pred))+
-  facet_wrap(~mod_ID)+
+  geom_point(aes(mean_abund, mean_pred, col = family_names), cex =3)+
+  facet_wrap(~mod_ID, scale = "free")+
   scale_x_log10() +
   scale_y_log10() +
   main_theme
 
-recap_df %>%
+recap_pred_df %>%
   group_by(mod_ID) %>%
   summarise(mean(RMSE))
 ```
@@ -804,7 +800,7 @@ recap_df %>%
 ```{r}
 mods_crossvalidation_df %>%
   ggplot()+
-  facet_wrap(~mod_ID)+
+  facet_wrap(~mod_ID, scale = "free")+
   geom_point(aes(true_abund,pred_abund)) +
   geom_smooth(aes(true_abund, pred_abund), method = "lm") +
   geom_abline(slope=1) +
@@ -815,28 +811,44 @@ mods_crossvalidation_df %>%
 
 
 mods_crossvalidation_df %>%
- filter(mod_ID ==2) %>%
+ filter(mod_ID ==1) %>%
   ggplot()+
 
-  geom_point(aes(true_abund,pred_abund)) +
+  geom_point(aes(true_abund,pred_abund), cex = 4) +
+  facet_wrap(~family_names)+
+    #facet_grid(col = vars(family_names), row = vars(mod_ID), scale  = "free") +
+  geom_abline(slope=1) +
+
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(x= "Observed abundances", y = "Predicted abudances")+
+  main_theme
+
+mods_crossvalidation_df %>%
+ filter(mod_ID ==3) %>%
+  ggplot()+
+
+  geom_point(aes(true_abund,pred_abund), cex = 4) +
   facet_wrap(~family_names, scale ="free")+
     #facet_grid(col = vars(family_names), row = vars(mod_ID), scale  = "free") +
   geom_abline(slope=1) +
-  labs(x= "Observed abundances", y = "Predicted abudances")
+  labs(x= "Observed abundances", y = "Predicted abudances")+
+  main_theme
 
 ```
 
 ```{r include=FALSE}
-postBeta2 <- getPostEstimate(m_converg, parName = "Beta")
+list_mods_crossvalidation[[3]]$m_converg -> m_converg_selected
+postBeta2 <- getPostEstimate(m_converg_selected, parName = "Beta")
 beta_results <- postBeta2$mean
-mpost2 <- convertToCodaObject(m_converg)
+mpost2 <- convertToCodaObject(m_converg_selected)
 gelman.diag(mpost2$Beta, multivariate = FALSE) -> gelman_diag_df2
 gelman_diag_df2$psrf
 
 beta_results <- postBeta2$mean
-rownames(beta_results) <- colnames(m_converg$X)
+rownames(beta_results) <- colnames(m_converg_selected$X)
 beta_results <- beta_results * ((postBeta2$support > 0.9) + (postBeta2$support < (1 - 0.9)) > 0)
-beta_results <- t(beta_results)[family_tree_filter$tip.label, colnames(m_converg$X)]
+beta_results <- t(beta_results)[family_tree_filter$tip.label, colnames(m_converg_selected$X)]
 #colnames(beta_results) <- c("Intercept","NDVI", "Rain", "tmin", "tdelta", "wind") #  "Cluster B", "Cluster C", "Cluster E", "LD Medium", "LD High", 
 
 ```
@@ -860,33 +872,6 @@ gheatmap(p, beta_results, offset = 1, width = 1, font.size = 5,
                        limits = c(min(beta_results), max(beta_results))) +
   scale_y_continuous(expand = c(0, 5)) +
   labs(fill = "Parameters\nvalues")
-```
-
-Response of occurrences :
-
-```{r echo=FALSE}
-postBeta_bin2 <- getPostEstimate(m_converg_bin, parName = "Beta")
-mpost_bin2 <- convertToCodaObject(m_converg_bin)
-gelman.diag(mpost_bin2$Beta, multivariate = FALSE) -> gelman_diag_bin_df2
-gelman_diag_bin_df2$psrf
-# Binary betas
-beta_bin_results <- postBeta_bin2$mean
-rownames(beta_bin_results) <- colnames(m_converg_bin$X)
-beta_bin_results <- beta_bin_results * ((postBeta_bin2$support > 0.9) + (postBeta_bin2$support < (1 - 0.9)) > 0)
-beta_bin_results <- t(beta_bin_results)[family_tree_filter$tip.label, colnames(m_converg_bin$X)]
-#colnames(beta_bin_results) <- c("Intercept","NDVI", "Rain", "tmax")
-
-p_bin <- ggtree(family_tree_filter, layout = "roundrect") +
-  geom_tiplab(align = TRUE) +
-  theme_tree()
-
-gheatmap(p_bin, beta_bin_results, offset = 1, width = 1, font.size = 5,
-         colnames_angle = -60, hjust = 0) +
-  scale_fill_gradient2(low = "blue", mid = "white", high = "red", na.value = "grey90",
-                       limits = c(min(beta_bin_results), max(beta_bin_results))) +
-  scale_y_continuous(expand = c(0, 5)) +
-  labs(fill = "Parameters\nvalues")
-
 ```
 
 ### Phylogenetic signal
@@ -984,13 +969,13 @@ Variance explain by each variables for each family
 abundances: 
 
 ```{r echo=FALSE, warning=FALSE}
-VP2 <- computeVariancePartitioning(m_converg, na.ignore = TRUE)
+VP2 <- computeVariancePartitioning(m_converg_selected, na.ignore = TRUE)
 
 
 VP2$vals %>%
   as.data.frame() %>%
   rownames_to_column("var") %>%
-  mutate(var = factor(var, levels = c("ndvi", "precip", "tmin", "tdelta", "wind", "Random: sample"))) %>%
+  #mutate(var = factor(var, levels = c("ndvi", "precip", "tmin", "tdelta", "wind", "Random: sample"))) %>%
   pivot_longer(-var) %>%
   ggplot() +
   geom_col(aes(x = name, y = value, fill = var)) +
@@ -1020,40 +1005,14 @@ Abundances :
 ```{r echo=FALSE}
 library(corrplot)
 
-OmegaCor <- computeAssociations(m_converg)
+OmegaCor <- computeAssociations(m_converg_selected)
 supportLevel <- 0.95
 toPlot <- ((OmegaCor[[1]]$support > supportLevel) + (OmegaCor[[1]]$support < (1 - supportLevel)) > 0) * OmegaCor[[1]]$mean
 
 corrplot(toPlot, method = "color", col = colorRampPalette(c("blue", "white", "red"))(200),
          tl.cex = 0.6, tl.col = "black",
-         title = paste("random effect level:", m_converg$rLNames[1]),
+         title = paste("random effect level:", m_converg_selected$rLNames[1]),
          mar = c(0, 0, 1, 0), order = "hclust")
-```
-
-
-
-
-```{r}
-
-partition = createPartition(m_converg, nfolds = 5, column = "sample")
-#preds_pois = computePredictedValues(m_converg, partition = partition, thin = thin, nParallel = 14)
-
-
-preds_expl = computePredictedValues(m_converg, thin = thin, nParallel = 14)
-MF_expl = evaluateModelFit(hM = m_converg, predY = preds_expl) 
-mean(MF_expl$RMSE)
-#Predictive power based on cross-validation  
-preds_pred =computePredictedValues(m_converg, partition = partition, thin = thin, nParallel = 14)
-MF_pred = evaluateModelFit(hM = m_converg, predY = preds_pred)
-
-mean(MF_pred$RMSE)
-
-mPredY_pois <- apply(abind::abind(preds_pred, along = 3), c(1, 2), matrixStats::mean2)
-
-colnames(mPredY_pois) <- colnames(m_converg$Y)
-rownames(mPredY_pois) <- rownames(m_converg$Y)
-
-
 ```
 
 ```{r}
