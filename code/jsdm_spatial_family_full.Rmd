@@ -688,7 +688,7 @@ compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 12,   test.run = T){
 ```{r}
 library(purrr)
 1:6 %>%
-  purrr::map(\(x) compute.hmsc(mod_list[[x]], nfold = 5, nChains = 14,   test.run = F)) -> list_mods_crossvalidation
+  purrr::map(\(x) compute.hmsc(mod_list[[x]], nfold = 10, nChains = 14,   test.run = F)) -> list_mods_crossvalidation
 
 ```
 
@@ -829,8 +829,10 @@ mods_crossvalidation_df %>%
   ggplot()+
 
   geom_point(aes(true_abund,pred_abund), cex = 4) +
-  facet_wrap(~family_names, scale ="free")+
+  facet_wrap(~family_names)+
     #facet_grid(col = vars(family_names), row = vars(mod_ID), scale  = "free") +
+  scale_x_log10() +
+  scale_y_log10() +
   geom_abline(slope=1) +
   labs(x= "Observed abundances", y = "Predicted abudances")+
   main_theme
