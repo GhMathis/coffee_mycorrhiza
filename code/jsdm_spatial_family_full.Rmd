@@ -527,23 +527,23 @@ covariate_standa_df %>%
 
 ```{r echo=FALSE}
 
-
-nChains = 12
-test.run = F
-if (test.run){
-  #with this option, the vignette runs fast but results are not reliable
-  thin = 5
-  samples = 10
-  transient = 5*thin
-  verbose = 5*thin
-} else {
-  #with this option, the vignette evaluates slow but it reproduces the results of the
-  #.pdf version
-  thin = 10
-  samples = 750
-  transient = 1000*thin
-  verbose = 1000*thin
-}
+# 
+# nChains = 12
+# test.run = F
+# if (test.run){
+#   #with this option, the vignette runs fast but results are not reliable
+#   thin = 5
+#   samples = 10
+#   transient = 5*thin
+#   verbose = 5*thin
+# } else {
+#   #with this option, the vignette evaluates slow but it reproduces the results of the
+#   #.pdf version
+#   thin = 10
+#   samples = 750
+#   transient = 1000*thin
+#   verbose = 1000*thin
+# }
 # covariate_standa_df %>%
 #   filter(Sample_code != "ROB_M19_s")  -> covariate_standa_filter_df
 # Y_family %>%
@@ -938,10 +938,19 @@ mods_crossvalidation_df %>%
 ```
 
 # Occurence model
+```{r}
+Y_family_bin <- Y_family %>%
+  as.data.frame() %>%
+  rownames_to_column("soil_code") %>%
+  pivot_longer(-soil_code) %>%
+  mutate(value = ifelse(value == 0, 0, 1)) %>%
+  pivot_wider(names_from = name, values_from = value) %>%
+  column_to_rownames("soil_code")
+```
 
 ```{r echo=FALSE}
 mod_bin_null <- Hmsc(
-  Y = Y_family,
+  Y = Y_family_bin,
   XData =  covariate_standa_df ,
   XFormula = ~ 1,
   #phyloTree = family_tree_filter,
@@ -951,7 +960,7 @@ mod_bin_null <- Hmsc(
 )
 
 mod_bin_ndvi <- Hmsc(
-  Y = Y_family,
+  Y = Y_family_bin,
   XData = covariate_standa_df,
   XFormula = ~ ndvi,
   #phyloTree = family_tree_filter,
@@ -962,7 +971,7 @@ mod_bin_ndvi <- Hmsc(
 
 
 mod_bin_precip <- Hmsc(
-  Y = Y_family,
+  Y = Y_family_bin,
   XData = covariate_standa_df,
   XFormula = ~ precip,
   #phyloTree = family_tree_filter,
@@ -972,7 +981,7 @@ mod_bin_precip <- Hmsc(
 )
 
 mod_bin_tmax <- Hmsc(
-  Y = Y_family,
+  Y = Y_family_bin,
   XData =  covariate_standa_df,
   XFormula = ~ tmax,
   #phyloTree = family_tree_filter,
@@ -982,7 +991,7 @@ mod_bin_tmax <- Hmsc(
 )
 
 mod_bin_wind  <- Hmsc(
-  Y = Y_family,
+  Y = Y_family_bin,
   XData = covariate_standa_df,
   XFormula = ~ wind,
   #phyloTree = family_tree_filter,
@@ -992,7 +1001,7 @@ mod_bin_wind  <- Hmsc(
 )
 
 mod_bin_full <- Hmsc(
-  Y = Y_family,
+  Y = Y_family_bin,
   XData = covariate_standa_df,
   XFormula = ~ ndvi + precip + tmax +tdelta + wind,
   #phyloTree = family_tree_filter,
@@ -1002,37 +1011,7 @@ mod_bin_full <- Hmsc(
 )
 
 mod_bin_poly <- Hmsc(
-  Y = Y_family,
-  XData = covariate_standa_df,
-  XFormula = ~poly(ndvi,2) + poly(precip,2) + poly(tmax,2) + poly(tdelta,2) + poly(wind,2),
-  #phyloTree = family_tree_filter,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "probit"
-)
-
-mod_bin_null_log <- Hmsc(
-  Y = log1p(Y_family),
-  XData =  covariate_standa_df ,
-  XFormula = ~ 1,
-  #phyloTree = family_tree_filter,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "probit"
-)
-
-mod_bin_full_log <- Hmsc(
-  Y = log1p(Y_family),
-  XData = covariate_standa_df,
-  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
-  #phyloTree = family_tree_filter,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "probit"
-)
-
-mod_bin_poly_log <- Hmsc(
-  Y = log1p(Y_family),
+  Y = Y_family_bin,
   XData = covariate_standa_df,
   XFormula = ~poly(ndvi,2) + poly(precip,2) + poly(tmax,2) + poly(tdelta,2) + poly(wind,2),
   #phyloTree = family_tree_filter,
@@ -1042,24 +1021,22 @@ mod_bin_poly_log <- Hmsc(
 )
 
 
-model_list <- list(
+
+model_bin_list <- list(
   mod_bin_null      = mod_bin_null,
   mod_bin_ndvi      = mod_bin_ndvi,
   mod_bin_precip    = mod_bin_precip,
   mod_bin_tmax      = mod_bin_tmax,
   mod_bin_wind      = mod_bin_wind,
   mod_bin_full      = mod_bin_full,
-  mod_bin_poly      = mod_bin_poly,
-  mod_bin_null_log  = mod_bin_null_log,
-  mod_bin_full_log  = mod_bin_full_log,
-  mod_bin_poly_log  = mod_bin_poly_log
+  mod_bin_poly      = mod_bin_poly
 )
 ```
 
 ```{r}
 library(purrr)
-1:length(model_list) %>%
-  purrr::map(\(x) compute.hmsc(model_list[[x]], nfold = 5, nChains = 14,   test.run = F)) -> list_mods_crossvalidation
+1:length(model_bin_list) %>%
+  purrr::map(\(x) compute.hmsc(model_bin_list[[x]], nfold = 5, nChains = 14,   test.run = T)) -> list_mods_bin_crossvalidation
 
 ```
 
@@ -1084,48 +1061,110 @@ extract.pred.power <- function(mod_crossvalidation, mod_ID){
   abund_df
 }
 
-1:length(model_list) %>%
-  purrr::map(\(x) extract.pred.power(list_mods_crossvalidation[[x]],mod_ID = x)) %>%
-  bind_rows() %>%
-  mutate(pred_abund = case_when(mod_ID %in% c(8,9,10) ~ exp(pred_abund)-1,
-                          .default = pred_abund),
-         true_abund = case_when(mod_ID %in% c(8,9,10) ~ exp(true_abund)-1,
-                          .default = true_abund))-> mods_crossvalidation_df
-mods_crossvalidation_df %>%
-  filter(mod_ID == 1) %>% head
-mods_crossvalidation_df %>%
-  filter(mod_ID == 2) %>% head
-mods_crossvalidation_df %>%
-  filter(mod_ID == 10) %>% head
+1:length(model_bin_list) %>%
+  purrr::map(\(x) extract.pred.power(list_mods_bin_crossvalidation[[x]],mod_ID = x)) %>%
+  bind_rows() -> mods_bin_crossvalidation_df
 
-1:length(model_list)%>%
-  purrr::map(\(x) list_mods_crossvalidation[[x]][["MF_pred"]] %>%
+
+1:length(model_bin_list)%>%
+  purrr::map(\(x) list_mods_bin_crossvalidation[[x]][["MF_pred"]] %>%
                as.data.frame %>%
                mutate(family_names = colnames(Y_family),
                       mod_ID = x)) %>%
   bind_rows() %>%
-  mutate(RMSE = case_when(mod_ID %in% c(8,9,10) ~ exp(RMSE)+1,
-                        .default = RMSE)) %>%
-  left_join( mods_crossvalidation_df %>%
+  left_join( mods_bin_crossvalidation_df %>%
     group_by(family_names,mod_ID) %>%
-    summarise(median_abund = median(true_abund, na.rm = T),
+    summarise(
               mean_abund = mean(true_abund, na.rm = T),
               sd_abund = sd(true_abund, na.rm = T),
-              median_pred = median(pred_abund, na.rm = T),
+            
               mean_pred = mean(pred_abund, na.rm = T),
-              sd_pred = sd(pred_abund, na.rm = T)), by = join_by(family_names== family_names, mod_ID==mod_ID)) %>%
-  mutate(ratio_RMSE_sd = (RMSE)/sd_abund) -> recap_pred_df
+              sd_pred = sd(pred_abund, na.rm = T)), by = join_by(family_names== family_names, mod_ID==mod_ID)) -> recap_pred_bin_df
 
-1:length(model_list) %>%
-  purrr::map(\(x) list_mods_crossvalidation[[x]][["MF_expl"]] %>%
+1:length(model_bin_list) %>%
+  purrr::map(\(x) list_mods_bin_crossvalidation[[x]][["MF_expl"]] %>%
                as.data.frame %>%
                mutate(family_names = colnames(Y_family),
                       mod_ID = x)) %>%
-  bind_rows() %>%
-  mutate(RMSE = case_when(mod_ID %in% c(8,9,10) ~ exp(RMSE)+1,
-                          .default = RMSE))-> recap_expl_df
+  bind_rows() -> recap_expl_bin_df
 
 ```
+
+```{r}
+recap_expl_bin_df %>%
+  group_by(mod_ID) %>%
+  summarise(mean_auc_expl = mean(AUC, na.rm = T)) %>%
+  ggplot() +
+  geom_point(aes(as.factor(mod_ID), mean_auc_expl)) +
+  main_theme
+
+recap_pred_bin_df %>%
+  group_by(mod_ID) %>%
+  summarise(mean_auc_pred = mean(AUC, na.rm = T)) %>%
+  ggplot() +
+  geom_point(aes(as.factor(mod_ID), mean_auc_pred)) +
+  main_theme
+
+```
+
+```{r}
+library(viridis)
+recap_pred_bin_df %>%
+  #filter(!(mod_ID %in% c(1,2,3,4))) %>%
+  ggplot() +
+  geom_point(aes(family_names, AUC, col = as.factor(mod_ID)),cex = 3, alpha =0.8) +
+  scale_color_viridis(discrete = T)+
+  main_theme
+
+recap_pred_bin_df %>%
+  #filter(!(mean_pred>5000 & mod_ID ==4 )) %>%
+  ggplot() +
+  geom_abline(slope=1) +
+  geom_point(aes(mean_abund, mean_pred, col = family_names), cex =3)+
+  facet_wrap(~mod_ID, scale = "free")+
+  main_theme
+
+recap_pred_bin_df %>%
+  group_by(mod_ID) %>%
+  summarise(mean(RMSE))
+```
+
+```{r}
+mods_bin_crossvalidation_df %>%
+  ggplot()+
+  facet_wrap(~mod_ID, scale = "free")+
+  geom_point(aes(pred_abund,true_abund)) +
+  geom_smooth(aes(pred_abund,true_abund), method = "glm") +
+  geom_abline(slope=1) +
+  labs(x= "Predicted occurance", y = "Observed occurance") +
+  main_theme
+
+
+mods_bin_crossvalidation_df %>%
+  filter(mod_ID == 7) %>%
+  ggplot()+
+  facet_wrap(~family_names) +
+  geom_point(aes(pred_abund,true_abund)) +
+  geom_smooth(aes(pred_abund,true_abund), method = "glm") +
+  geom_abline(slope=1) +
+  labs(x= "Predicted occurance", y = "Observed occurance") +
+  main_theme
+
+recap_pred_bin_df %>%
+  filter(mod_ID == 7) %>%
+  ggplot() +
+  geom_abline(slope=1) +
+  geom_point(aes(mean_abund, mean_pred, col = family_names), cex =3)+
+  facet_wrap(~mod_ID, scale = "free")+
+  main_theme
+
+recap_pred_bin_df %>%
+  filter(mod_ID == 7) %>%
+  ggplot() +
+  geom_point(aes(family_names, AUC),cex = 3, alpha =0.8) +
+  main_theme
+```
+
 
 ## Models results
 ### Convergence
