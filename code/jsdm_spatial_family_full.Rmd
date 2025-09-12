@@ -526,7 +526,7 @@ covariate_standa_df %>%
 
 
 ```{r echo=FALSE}
-library(Hmsc)
+
 
 nChains = 12
 test.run = F
@@ -937,6 +937,199 @@ mods_crossvalidation_df %>%
 
 ```
 
+# Occurence model
+
+```{r echo=FALSE}
+mod_bin_null <- Hmsc(
+  Y = Y_family,
+  XData =  covariate_standa_df ,
+  XFormula = ~ 1,
+  #phyloTree = family_tree_filter,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+mod_bin_ndvi <- Hmsc(
+  Y = Y_family,
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi,
+  #phyloTree = family_tree_filter,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+
+mod_bin_precip <- Hmsc(
+  Y = Y_family,
+  XData = covariate_standa_df,
+  XFormula = ~ precip,
+  #phyloTree = family_tree_filter,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+mod_bin_tmax <- Hmsc(
+  Y = Y_family,
+  XData =  covariate_standa_df,
+  XFormula = ~ tmax,
+  #phyloTree = family_tree_filter,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+mod_bin_wind  <- Hmsc(
+  Y = Y_family,
+  XData = covariate_standa_df,
+  XFormula = ~ wind,
+  #phyloTree = family_tree_filter,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+mod_bin_full <- Hmsc(
+  Y = Y_family,
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
+  #phyloTree = family_tree_filter,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+mod_bin_poly <- Hmsc(
+  Y = Y_family,
+  XData = covariate_standa_df,
+  XFormula = ~poly(ndvi,2) + poly(precip,2) + poly(tmax,2) + poly(tdelta,2) + poly(wind,2),
+  #phyloTree = family_tree_filter,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+mod_bin_null_log <- Hmsc(
+  Y = log1p(Y_family),
+  XData =  covariate_standa_df ,
+  XFormula = ~ 1,
+  #phyloTree = family_tree_filter,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+mod_bin_full_log <- Hmsc(
+  Y = log1p(Y_family),
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
+  #phyloTree = family_tree_filter,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+mod_bin_poly_log <- Hmsc(
+  Y = log1p(Y_family),
+  XData = covariate_standa_df,
+  XFormula = ~poly(ndvi,2) + poly(precip,2) + poly(tmax,2) + poly(tdelta,2) + poly(wind,2),
+  #phyloTree = family_tree_filter,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+
+model_list <- list(
+  mod_bin_null      = mod_bin_null,
+  mod_bin_ndvi      = mod_bin_ndvi,
+  mod_bin_precip    = mod_bin_precip,
+  mod_bin_tmax      = mod_bin_tmax,
+  mod_bin_wind      = mod_bin_wind,
+  mod_bin_full      = mod_bin_full,
+  mod_bin_poly      = mod_bin_poly,
+  mod_bin_null_log  = mod_bin_null_log,
+  mod_bin_full_log  = mod_bin_full_log,
+  mod_bin_poly_log  = mod_bin_poly_log
+)
+```
+
+```{r}
+library(purrr)
+1:length(model_list) %>%
+  purrr::map(\(x) compute.hmsc(model_list[[x]], nfold = 5, nChains = 14,   test.run = F)) -> list_mods_crossvalidation
+
+```
+
+```{r}
+
+extract.pred.power <- function(mod_crossvalidation, mod_ID){
+
+  mod_crossvalidation[["mPredY"]] %>%
+      as.data.frame() %>%
+      rownames_to_column("Sample_code") %>%
+      pivot_longer(-Sample_code, names_to = "family_names", values_to = "pred_abund") -> mPredY_long
+  
+  mod_crossvalidation[["m_converg"]]$Y %>%
+    as.data.frame() %>%
+    rownames_to_column("Sample_code") %>%
+    pivot_longer(-Sample_code, names_to = "family_names", values_to = "true_abund") -> true_data_long
+  
+  mPredY_long %>%
+    left_join(true_data_long, by = join_by(family_names,Sample_code)) %>%
+    mutate (mod_ID = mod_ID) -> abund_df
+  
+  abund_df
+}
+
+1:length(model_list) %>%
+  purrr::map(\(x) extract.pred.power(list_mods_crossvalidation[[x]],mod_ID = x)) %>%
+  bind_rows() %>%
+  mutate(pred_abund = case_when(mod_ID %in% c(8,9,10) ~ exp(pred_abund)-1,
+                          .default = pred_abund),
+         true_abund = case_when(mod_ID %in% c(8,9,10) ~ exp(true_abund)-1,
+                          .default = true_abund))-> mods_crossvalidation_df
+mods_crossvalidation_df %>%
+  filter(mod_ID == 1) %>% head
+mods_crossvalidation_df %>%
+  filter(mod_ID == 2) %>% head
+mods_crossvalidation_df %>%
+  filter(mod_ID == 10) %>% head
+
+1:length(model_list)%>%
+  purrr::map(\(x) list_mods_crossvalidation[[x]][["MF_pred"]] %>%
+               as.data.frame %>%
+               mutate(family_names = colnames(Y_family),
+                      mod_ID = x)) %>%
+  bind_rows() %>%
+  mutate(RMSE = case_when(mod_ID %in% c(8,9,10) ~ exp(RMSE)+1,
+                        .default = RMSE)) %>%
+  left_join( mods_crossvalidation_df %>%
+    group_by(family_names,mod_ID) %>%
+    summarise(median_abund = median(true_abund, na.rm = T),
+              mean_abund = mean(true_abund, na.rm = T),
+              sd_abund = sd(true_abund, na.rm = T),
+              median_pred = median(pred_abund, na.rm = T),
+              mean_pred = mean(pred_abund, na.rm = T),
+              sd_pred = sd(pred_abund, na.rm = T)), by = join_by(family_names== family_names, mod_ID==mod_ID)) %>%
+  mutate(ratio_RMSE_sd = (RMSE)/sd_abund) -> recap_pred_df
+
+1:length(model_list) %>%
+  purrr::map(\(x) list_mods_crossvalidation[[x]][["MF_expl"]] %>%
+               as.data.frame %>%
+               mutate(family_names = colnames(Y_family),
+                      mod_ID = x)) %>%
+  bind_rows() %>%
+  mutate(RMSE = case_when(mod_ID %in% c(8,9,10) ~ exp(RMSE)+1,
+                          .default = RMSE))-> recap_expl_df
+
+```
+
+## Models results
+### Convergence
+
 ```{r include=FALSE}
 list_mods_crossvalidation[[9]]$m_converg -> m_converg_selected
 postBeta2 <- getPostEstimate(m_converg_selected, parName = "Beta")
@@ -952,7 +1145,7 @@ beta_results <- t(beta_results)[family_tree_filter$tip.label, colnames(m_converg
 #colnames(beta_results) <- c("Intercept","NDVI", "Rain", "tmin", "tdelta", "wind") #  "Cluster B", "Cluster C", "Cluster E", "LD Medium", "LD High", 
 
 ```
-## Models results
+
 
 ### family response to each varaibles
 
