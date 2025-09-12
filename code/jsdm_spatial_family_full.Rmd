@@ -1411,9 +1411,8 @@ if (length(predY) > 1) {
 ```
 
 ```{r}
-library(viridis)
-recap_df %>%
- filter(ratio_RMSE_sd<2) %>%
+recap_pred_df %>%
+ filter(mod_ID == 9,ratio_RMSE_sd<1) %>%
   pull(family_names) -> good_prediction
 data_spatial_df %>%
     bind_cols(EpredY_map) %>%
