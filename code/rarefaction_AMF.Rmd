@@ -367,65 +367,11 @@ plot(family_tree, cex = 0.7, main = "family-level Tree (collapsed from OTUs)")
 
 
 ```{r}
-cluster_family %>%
-  left_join(otu_family %>%
-              dplyr::select(-OTU), by = "amplicon") %>%
-  mutate(closest_taxa = str_remove_all(taxonomy, "(; [*])"),
-          closest_taxa2 = str_extract(closest_taxa, "([a-z]_[^;*]+)$")) -> cluster_taxonomy_levels
-  
-
-otu_family %>%
-  #select(-species) %>%
-  left_join(cluster_family %>%
-              dplyr::select(amplicon, taxonomy), by = "amplicon") %>%
-  separate(taxonomy, into = paste0("L", 1:7), sep = ";\\s*", fill = "right")%>%
-  rename(labels = "family",kingdom = "L1", phylum = "L2",class = "L3", order = "L4", family = "L5",
-                           genus = "L6", species = "L7") %>%
-  dplyr::select(-c(genus, species, amplicon, OTU)) %>%
-  group_split(labels,.keep = T)
-  summarise(across(everything(), ~unique(.x))) %>%
-  left_join(as_tibble(family_tree), by = join_by(labels ==label) ) -> closest_taxa_df
-```
-
-
-```{r}
-library(pals)
-ggtree(family_tree, ladderize=T)+#geom_label(aes(label = node)) +
-  #geom_tiplab()+
-  xlim(0,1.6) -> p1
-p1
-   
-
-
-ggtree::flip(p1, 29,18) -> p2
-ggtree::flip(p2, 16,6) -> p2
-ggtree::rotate(p2, 29) -> p2
-p2 +
-  geom_cladelab(
-    data = closest_taxa_df,
-      mapping = aes(
-      node = node,
-      label = label,
-      color = order
-    ),
-    fontsize = 3,
-    align = F,
-    show.legend = T
-     ) +
-  geom_hilight(
-    data= closest_taxa_df,
-    mapping = aes(  
-    node = node,
-    fill=as.factor(class))
-  )+
-  scale_color_bmj()
-```
-
-```{r}
 ape::write.tree(phy = family_tree, file = "outputs/phylo_tree/Robust_MiSeq_18S_AMf_20241120_125_samples_Eukaryome_Glomeromycota_family.tree")
 ```
 
 # Abundance at genus level
+
 ```{r}
 amf_OTUs_decont %>%
   #{{sample to exclude}}
@@ -451,7 +397,8 @@ write.table(amf_genus_decont2, "outputs/abundance_tables/Robust_MiSeq_18S_AMf_20
 ```
 
 ```{r}
-amf_OTUs_rare %>%
+amf_OTUs_rare %>% 
+  filter(family %in% c("f__Glomeraceae", "f__Acaulosporaceae", "f__Gigasporaceae","f__Diversisporaceae")) %>%
   unite(taxonomy, kingdom, phylum, class, order, family, genus, sep = "; ") %>%
   dplyr::select(taxonomy, starts_with("ROB")) %>%
   group_by(taxonomy)%>%
@@ -464,11 +411,9 @@ amf_OTUs_rare %>%
   dplyr::select(-taxonomy) %>%
   group_by(genus) %>%
   summarise_all(sum) -> amf_genus_rare
-unique(amf_genus_rare$genus)
 
 
-
-write.table(amf_genus_rare, "outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.rarefy.Glomeromycota_genus.txt")
+write.table(amf_genus_rare, "outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.afm_rarefy_genus.txt")
 ```
 
 
