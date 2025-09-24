@@ -3,7 +3,7 @@ title: "Untitled"
 output: html_document
 date: "2025-09-04"
 editor_options: 
-  chunk_output_type: console
+  chunk_output_type: inline
 ---
 ```{r setup, include=FALSE,purl = T}
 knitr::opts_chunk$set(purl = T)
@@ -1789,19 +1789,12 @@ https://doi.org/10.1111/1365-2745.13839
 
 ```{r echo=FALSE, purl = FALSE}
 lambda_df %>%
-  filter(p_value <= 0.05) %>%
   ggplot() +
-  geom_point(aes(lambda, covariate, col = model), cex = 4) +
-  theme_classic() +
-  theme(
-    axis.title.y = element_blank(),
-    axis.text.x = element_text(colour = "black", size = 13, face = "italic", angle = 90, vjust = 0, hjust = 1),
-    axis.text.y = element_text(colour = "black", size = 13, face = "italic"),
-    axis.title = element_text(colour = "black", size = 16),
-    panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
-    legend.title = element_text(colour = "black", size = 16, hjust = 0.5),
-    legend.text = element_text(colour = "black", size = 13)
-  )
+    geom_point(aes(lambda, covariate,colour = model, alpha = p_value <= 0.05), cex = 4) +
+  geom_vline(xintercept = 0, linetype = 2) +
+  geom_vline(xintercept = 1,linetype = 2) +
+  scale_color_viridis(discrete = T)+
+  main_theme_final
 ```
 
 
@@ -2121,50 +2114,9 @@ data_spatial_df %>%
     filter(!(name %in% c("Unknown Archaeosporomycetes (4 OTU)",
                        "Unknown cl01 (27 OTU)",
                        "Unknown Glomeromycota (6 OTU)",
-                       "Glomeraceae (452 OTU)"))) %>%
+                       "Glomeraceae (452 OTU)",
+                       "Acaulosporaceae (88 OTU)"))) %>%
     mutate(value = value) %>%
-    ggplot() +
-    facet_wrap(~name) +
-    geom_raster(aes(x, y, fill = value)) +
-    scale_fill_viridis(option = "magma") +
-    labs(x = "Lon", y = "Lat", fill = "Abundance (log10)") +
-    theme_classic() +
-    theme(
-      aspect.ratio = 1,
-      plot.margin = margin(0, 0, 0, 0),
-      axis.title.x = element_blank(),
-      panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
-      axis.title.y = element_text(colour = "black", size = 14, face = "italic")
-    )
-data_spatial_df %>%
-    bind_cols(EpredY_map) %>%
-    pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
-    filter(!(name %in% c("Unknown Archaeosporomycetes (4 OTU)",
-                       "Unknown cl01 (27 OTU)",
-                       "Unknown Glomeromycota (6 OTU)",
-                       "Glomeraceae (452 OTU)"))) %>%
-    mutate(value = value) %>%
-    ggplot() +
-    facet_wrap(~name) +
-    geom_raster(aes(x, y, fill = value)) +
-    scale_fill_viridis(option = "magma") +
-    labs(x = "Lon", y = "Lat", fill = "Abundance (log10)") +
-    theme_classic() +
-    theme(
-      aspect.ratio = 1,
-      plot.margin = margin(0, 0, 0, 0),
-      axis.title.x = element_blank(),
-      panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
-      axis.title.y = element_text(colour = "black", size = 14, face = "italic")
-    )
-data_spatial_df %>%
-    bind_cols(EpredY_map) %>%
-    pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
-    filter(!(name %in% c("Unknown Archaeosporomycetes (4 OTU)",
-                       "Unknown cl01 (27 OTU)",
-                       "Unknown Glomeromycota (6 OTU)",
-                       "Glomeraceae (452 OTU)"))) %>%
-    mutate(value = value ) %>%
     ggplot() +
     facet_wrap(~name) +
     geom_raster(aes(x, y, fill = value)) +
