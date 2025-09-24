@@ -468,12 +468,12 @@ compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 12,   test.run = T){
 
 
 ```{r}
-1:length(model_list) %>%
-  purrr::map(\(x) compute.hmsc(model_list[[x]], nfold = 5, nChains = 6,   test.run = F)) -> list_mods_crossvalidation
-
-
-save(list_mods_crossvalidation,file =  "outputs/list_mods_crossvalidation_genus_pois_log.RData")
-# load(file = "outputs/list_mods_crossvalidation_genus_pois_log.RData")
+# 1:length(model_list) %>%
+#   purrr::map(\(x) compute.hmsc(model_list[[x]], nfold = 5, nChains = 6,   test.run = F)) -> list_mods_crossvalidation
+# 
+# 
+# save(list_mods_crossvalidation,file =  "outputs/list_mods_crossvalidation_genus_pois_log.RData")
+load(file = "outputs/list_mods_crossvalidation_genus_pois_log.RData")
 ```
 
 ```{r, purl = FALSE}
@@ -570,7 +570,7 @@ mods_crossvalidation_df %>%
 
 
 mods_crossvalidation_df %>%
-  filter(mod_ID == "mod_pois_full") %>%
+  filter(mod_ID == "mod_pois_poly") %>%
   ggplot()+
   geom_point(aes(true_abund,pred_abund), cex = 4) +
   facet_wrap(~genus_names)+
@@ -824,7 +824,7 @@ recap_pred_bin_df %>%
 
 ```{r, purl = FALSE}
 compute.ROC <- function(observed, predicted, pred_name){
-  df_roc_AUC = data.frame(threshold = seq(0.01,1,0.01),
+  df_roc_AUC = data.frame(threshold =  sort(unique(predicted)),
                         pred_name = pred_name,
                         precision = NA,
                         TPR = NA,
@@ -925,7 +925,7 @@ max_f1_score_df
 ### Convergence
 
 ```{r include=FALSE, purl = FALSE}
-list_mods_crossvalidation[[6]]$m_converg -> m_converg_selected # pois_full_log_NA
+list_mods_crossvalidation[[8]]$m_converg -> m_converg_selected # pois_full_log_NA
 postBeta2 <- getPostEstimate(m_converg_selected, parName = "Beta")
 beta_results <- postBeta2$mean
 mpost2 <- convertToCodaObject(m_converg_selected)
@@ -1002,7 +1002,7 @@ library(purrr)
 # ------------------------------------------------------------------
 # Compute Pagel's lambda for each covariate via nlme gls + corPagel
 # ------------------------------------------------------------------
-models <- list(abund = list_mods_crossvalidation[[6]]$m_converg, bin = list_mods_bin_crossvalidation[[6]]$m_converg) # , 
+models <- list(abund = list_mods_crossvalidation[[8]]$m_converg, bin = list_mods_bin_crossvalidation[[8]]$m_converg) # , 
 
 compute.padgel.lambda <- function(models, i) {
   m <- models[[i]]
@@ -1082,7 +1082,7 @@ VP2 <- computeVariancePartitioning(m_converg_selected, na.ignore = TRUE)
 VP2$vals %>%
   as.data.frame() %>%
   rownames_to_column("var") %>%
-  mutate(var = factor(var, levels = c("ndvi", "precip", "tmax", "tdelta", "wind", "Random: sample"))) %>%
+ # mutate(var = factor(var, levels = c("ndvi", "precip", "tmax", "tdelta", "wind", "Random: sample"))) %>%
   pivot_longer(-var) %>%
   ggplot() +
   geom_col(aes(x = name, y = value, fill = var)) +
@@ -1319,8 +1319,8 @@ map_occurence_best_predicted_genus
 map_richness
 
 
-ggsave(plot = map_richness, filename = "figures/map_richness.svg", units = "cm", width = 11 ,height = 20)
-ggsave(plot = map_occurence_best_predicted_genus, filename = "figures/map_occurence_best_predicted_genus.svg", units = "cm", width = 33 ,height = 20 )
+# ggsave(plot = map_richness, filename = "figures/map_richness.svg", units = "cm", width = 11 ,height = 20)
+# ggsave(plot = map_occurence_best_predicted_genus, filename = "figures/map_occurence_best_predicted_genus.svg", units = "cm", width = 33 ,height = 20 )
 ```
 
 # Abundance
@@ -1364,14 +1364,15 @@ summary(EpredY_map)
 data_spatial_df %>%
     bind_cols(EpredY_map) %>%
     pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
-    filter(!(name %in% c("Unknown Archaeosporomycetes (4 OTU)",
-                       "Unknown cl01 (27 OTU)",
-                       "Unknown Glomeromycota (6 OTU)",
-                       "Glomeraceae (452 OTU)"))) %>%
+    filter(!(name %in% c("Glomeraceae_gen11 (7 OTU)",
+                       "Glomeraceae_gen05 (4 OTU)",
+                       "Funneliformis (2 OTU)",
+                       "Unknown Glomeraceae (120 OTU)",
+                       "Acaulospora (88 OTU)"))) %>%
     mutate(value = value) %>%
     ggplot() +
-    facet_wrap(~name) +
-    geom_raster(aes(x, y, fill = value)) +
+    facet_wrap(~name, scale = "free") +
+    geom_raster(aes(x, y, fill = log1p(value))) +
     scale_fill_viridis(option = "magma") +
     labs(x = "Lon", y = "Lat", fill = "Abundance (log10)") +
     theme_classic() +
@@ -1382,6 +1383,65 @@ data_spatial_df %>%
       panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
       axis.title.y = element_text(colour = "black", size = 14, face = "italic")
     )
+
+data_spatial_df %>%
+    bind_cols(EpredY_map) %>%
+    pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
+    filter(name %in% c("Acaulospora (88 OTU)")) %>%
+    mutate(value = value) %>%
+    ggplot() +
+    #facet_wrap(~name, scale = "free") +
+    geom_raster(aes(x, y, fill = value)) +
+    scale_fill_viridis(option = "magma") +
+    labs(x = "Lon", y = "Lat", fill = "Abundance (log10)") +
+    theme_classic() +
+    theme(
+      aspect.ratio = 1,
+      plot.margin = margin(0, 0, 0, 0),
+      axis.title.x = element_blank(),
+      panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+      axis.title.y = element_text(colour = "black", size = 14, face = "italic"))
+
+data_spatial_df %>%
+    bind_cols(EpredY_map) %>%
+    pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
+    filter(name %in% c("Gigaspora (14 OTU)")) %>%
+    mutate(value = value) %>%
+    ggplot() +
+    #facet_wrap(~name, scale = "free") +
+    geom_raster(aes(x, y, fill = value)) +
+    scale_fill_viridis(option = "magma") +
+    labs(x = "Lon", y = "Lat", fill = "Abundance (log10)") +
+    theme_classic() +
+    theme(
+      aspect.ratio = 1,
+      plot.margin = margin(0, 0, 0, 0),
+      axis.title.x = element_blank(),
+      panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+      axis.title.y = element_text(colour = "black", size = 14, face = "italic"))
+
+data_spatial_df %>%
+    bind_cols(EpredY_map) %>%
+    pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
+    filter(name %in% c("Septoglomus (16 OTU)")) %>%
+    mutate(value = value) %>%
+    ggplot() +
+    #facet_wrap(~name, scale = "free") +
+    geom_raster(aes(x, y, fill = value)) +
+    scale_fill_viridis(option = "magma") +
+    labs(x = "Lon", y = "Lat", fill = "Abundance (log10)") +
+    theme_classic() +
+    theme(
+      aspect.ratio = 1,
+      plot.margin = margin(0, 0, 0, 0),
+      axis.title.x = element_blank(),
+      panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+      axis.title.y = element_text(colour = "black", size = 14, face = "italic"))
+```
+
+
+```{r, purl = FALSE}
+)
 data_spatial_df %>%
     bind_cols(EpredY_map) %>%
     pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
