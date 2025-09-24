@@ -25,6 +25,7 @@
 *.html
 *.grib
 *.svg
+*.odt
 
 # History files
 .Rhistory
