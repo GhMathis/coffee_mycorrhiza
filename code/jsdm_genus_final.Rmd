@@ -282,7 +282,7 @@ amf_genus_rare <- amf_genus_rare %>%
 Y_genus <- amf_genus_rare %>%
   filter(rowSums(across(starts_with("ROB")) != 0) > 3) %>%
   t()
-
+rowSums(Y_genus)
 # Prepare Y without zeros as a truncated version
 Y_genus_trucated <- Y_genus %>%
   as.data.frame() %>%
@@ -522,10 +522,8 @@ extract.pred.power <- function(mod_crossvalidation, mod_ID){
 ```
 
 ```{r, purl = FALSE}
-
 recap_pred_df %>%
   #filter(!(mod_ID %in% c(1,2,3,4))) %>%
- 
   ggplot() +
   facet_wrap(~mod_ID) +
   geom_point(aes(genus_names, ratio_RMSE_sd),cex = 3, alpha =0.8) +
@@ -554,7 +552,7 @@ recap_pred_df %>%
 
 recap_pred_df %>%
   group_by(mod_ID) %>%
-  summarise(RMSE_mean = mean(RMSE)) %>%
+  summarise(RMSE_mean = median(RMSE)) %>%
   arrange(RMSE_mean)
 ```
 
@@ -568,9 +566,9 @@ mods_crossvalidation_df %>%
   labs(x= "Observed abundances", y = "Predicted abudances") +
   main_theme
 
-
 mods_crossvalidation_df %>%
   filter(mod_ID == "mod_pois_poly") %>%
+  filter(pred_abund <15) %>%
   ggplot()+
   geom_point(aes(true_abund,pred_abund), cex = 4) +
   facet_wrap(~genus_names)+
@@ -580,7 +578,6 @@ mods_crossvalidation_df %>%
 
 
 mods_crossvalidation_df %>%
- 
   ggplot()+
 
   geom_point(aes(true_abund,pred_abund, col = genus_names), cex = 4, alpha = 0.6) +
@@ -591,6 +588,41 @@ mods_crossvalidation_df %>%
   scale_color_viridis(discrete = T) +
   main_theme
 
+mods_crossvalidation_df %>%
+  group_by(mod_ID,Sample_code) %>%
+  summarise(sum(exp(true_abund)))
+mods_crossvalidation_df %>%
+  group_by(mod_ID,Sample_code) %>%
+  summarise(round(sum(exp(pred_abund))))
+```
+```{r}
+mods_crossvalidation_df %>%
+   filter(mod_ID == "mod_pois_full") %>%
+  group_by(genus_names) %>%
+  summarise(mean_abund = mean(true_abund)) %>%
+  arrange(mean_abund) %>% pull(genus_names) -> order_genus_by_abund
+mods_crossvalidation_df %>%
+  filter(pred_abund >10)
+exp(10)
+mods_crossvalidation_df %>%
+  # remove one extreme outier prediced value
+  filter(pred_abund <10^20) %>%
+  filter(mod_ID == "mod_pois_full") %>%
+  mutate(genus_names = factor(genus_names, levels =  order_genus_by_abund)) %>%
+  ggplot()+
+  geom_point(aes(true_abund, pred_abund, fill = genus_names),alpha =0.8, shape= 21, cex = 4) +
+  facet_wrap(~genus_names)+
+  geom_abline(slope=1) +
+  labs(x= "Observed abundances", y = "Predicted abudances", fill = "Taxa/Family names")+
+  scale_fill_viridis(discrete = T) +
+  main_theme_final+
+  theme(legend.position = "none",
+        strip.text = element_text(margin = margin(0.05,0,0.05,0, "cm"),size = 5))-> vaildation_mod_abund_genus_poly
+
+vaildation_mod_abund_genus_poly
+
+ggsave(plot = vaildation_mod_abund_genus_poly, filename = "figures/vaildation_mod_abund_genus_poly.pdf", units = "cm",
+        height = 16, width = 16)
 ```
 
 # Occurence model

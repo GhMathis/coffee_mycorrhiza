@@ -1,0 +1,354 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-09-25"
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r include=FALSE}
+library(tidyverse)
+library(raster)
+library(mapview)
+library(leaflet)
+library(leafem)
+library(rasterVis)
+library(readxl)
+library(sf)
+library(pals)
+library(viridis)
+library(ggtree)
+
+main_theme = theme_minimal() +
+ theme(aspect.ratio = 1,
+        axis.text.x = element_text(colour = "black", size=13, face="italic",angle =45, vjust =1, hjust =1),
+        axis.text.y = element_text(colour = "black", size=13, face="italic"),
+        axis.title = element_text(colour = "black", size=12),
+        panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+        legend.title = element_text(colour = "black", size=12,
+                                    hjust =0.5),
+
+        legend.text = element_text(colour = "black", size=13))
+
+main_theme_final = theme_bw() +
+ theme(aspect.ratio = 1,
+        axis.text.x = element_text(colour = "black", size=7, face="italic", vjust =1, hjust =1),
+        axis.text.y = element_text(colour = "black", size=7, face="italic"),
+        axis.title = element_text(colour = "black", size=9),
+        panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8),
+        #panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.title = element_text(colour = "black", size=9,
+                                    hjust =0.5),
+        legend.key.size = unit(0.3, 'cm'),
+        legend.text = element_text(colour = "black", size=7,face="italic"),
+        strip.background = element_blank(),
+        strip.text = element_text(margin = margin(0.05,0,0.05,0, "cm"),size = 7),
+        title = element_text(colour = "black", size=9))
+```
+# Spatial covariate
+
+## Sampling points
+```{r echo=FALSE}
+metadata <- read_xlsx(path = "data/Metadata_Doreen_070525.xlsx")
+soil_metadata <- read_xlsx(path = "data/soil_data_dry_season_2023.xlsx") %>% 
+  select(-c(Zone, Cluster, Replicate,`Robusta coffee system`)) %>%
+  rename(Sample_code = "SAMPLE NO",
+          clay = "Clay%",
+          N = "N%",
+          OC = "OC%",
+          pH = "soil pH",
+          sand= "Sand%",
+          silt = "Silt%",
+          OM = "OM%",
+          P = "P/mg/kg",
+          K = "K/Cmol/kg",
+          Na = "Na/Cmol/kg")
+
+utm_coords <- metadata %>%
+  mutate(
+    zone = as.numeric(substr(easting, 1, 2)),
+    band = substr(easting, 3, 3),
+    easting = as.numeric(sub(".* ", "", easting)),
+    northing = as.numeric(northing),
+
+    hemisphere = ifelse(band == "N", "north", "south") # M = South Hemisphere
+  )
+
+# Function to convert a single row to lat/lon
+convert_to_wgs84 <- function(zone, hemisphere, easting, northing,Sample_code) {
+  epsg <- if (hemisphere == "north") {
+    32600 + zone  # Northern hemisphere UTM EPSG codes
+  } else {
+    32700 + zone  # Southern hemisphere UTM EPSG codes
+  }
+
+  point <- st_sfc(st_point(c(easting, northing)), crs = epsg)
+  point_wgs84 <- st_transform(point, crs = 4326)
+  coords <- st_coordinates(point_wgs84)
+  tibble( lon = coords[1], lat = coords[2],Sample_code = Sample_code)
+}
+utm_coords %>%
+  mutate(zone = case_when(zone==32~ 36,
+                             .default = zone),
+          northing = case_when(Sample_code == "N17" ~ 86562,
+                             .default = northing)) -> utm_coords
+# Apply to each row
+wgs84_coords <- pmap_dfr(utm_coords[, c("zone", "hemisphere", "easting", "northing","Sample_code")], convert_to_wgs84) %>%
+  left_join(metadata, by = "Sample_code") %>%
+  st_as_sf(coords = c("lon", "lat"),crs = 4326) %>%
+  mutate(
+     lon= st_coordinates(.)[,1],
+     lat= st_coordinates(.)[,2]
+  )
+
+
+leaflet() %>% 
+  addTiles() %>%
+  addMarkers(data=wgs84_coords,~lon, ~lat, popup = ~paste(round(lat,2), round(lon,2)) , label = ~Sample_code)%>%
+  addCircleMarkers(data = wgs84_coords, lng = ~lon,
+                  lat = ~lat, radius = 8, color = "blue", fillOpacity = 0.8)
+```
+
+```{r}
+ug_border <- read_sf("data/ug_shp/ug.shp")
+
+ggplot(ug_border) +
+  geom_sf() +
+  geom_point(data =wgs84_coords, aes(x = lon,y = lat )) +
+  main_theme_final
+
+install.packages('osmdata')
+library(osmdata)
+library(ggmap)
+lisbon_map <- get_map(getbb('uganda'))
+```
+
+```{r}
+amf_genus_rare <- read.table("outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.afm_rarefy_genus.txt", header = TRUE, stringsAsFactors = FALSE)
+genus_tree <- read.tree("outputs/phylo_tree/Robust_MiSeq_18S_AMf_20241120_125_samples_Eukaryome_Glomeromycota_genus.tree")
+plot(genus_tree)
+genus_tree <- keep.tip(phy = genus_tree, tip = amf_genus_rare$genus)
+plot(genus_tree)
+genus_tree$tip.label
+genus_tree <- root(genus_tree, "g__Diversispora_21")
+plot(genus_tree)
+# Clean tip labels (example transformation)
+genus_rename <- genus_tree$tip.label %>%
+  str_remove("g__") %>%
+  str_replace_all("[a-z]__", "Unknown ") %>%
+  str_replace("_(\\d+)$", " (\\1 OTU)")
+length(genus_rename)
+genus_tree$tip.label <- genus_rename
+plot(ladderize(genus_tree))
+
+# Prepare Y matrix for families
+amf_genus_rare <- amf_genus_rare %>%
+  mutate(genus = genus %>%
+           str_remove("g__") %>%
+           str_replace_all("[a-z]__", "Unknown ") %>%
+           str_replace("_(\\d+)$", " (\\1 OTU)")) %>%
+  remove_rownames() %>%
+  column_to_rownames("genus")
+
+Y_genus <- amf_genus_rare %>%
+  filter(rowSums(across(starts_with("ROB")) != 0) > 3) %>%
+  t()
+
+```
+
+```{r echo=FALSE}
+amf_family_rare <- read.table("outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.rarefy.family.txt", header = TRUE, stringsAsFactors = FALSE)
+family_tree <- read.tree("outputs/phylo_tree/Robust_MiSeq_18S_AMf_20241120_125_samples_Eukaryome_Glomeromycota_family.tree")
+
+# Inspect and root tree
+family_tree$tip.label
+plot(family_tree)
+family_tree <- root(family_tree, "c__Archaeosporomycetes_4")
+
+# Clean tip labels (example transformation)
+family_rename <- family_tree$tip.label %>%
+  str_remove("f__") %>%
+  str_replace_all("[a-z]__", "Unknown ") %>%
+  str_replace("_(\\d+)$", " (\\1 OTU)")
+length(family_rename)
+family_tree$tip.label <- family_rename
+plot(family_tree)
+
+amf_family_rare <- amf_family_rare %>%
+  mutate(family = family %>%
+           str_remove("f__") %>%
+           str_replace_all("[a-z]__", "Unknown ") %>%
+           str_replace("_(\\d+)$", " (\\1 OTU)")) %>%
+  remove_rownames() %>%
+  column_to_rownames("family")
+
+Y_family <- amf_family_rare %>%
+  filter(rowSums(across(starts_with("ROB")) != 0) > 3) %>%
+  t()
+```
+
+```{r}
+data_18S <- "data/18S_AMf_Eukaryome/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.table2"
+amf_taxonomic_levels_eucaryome <- c("kingdom", "phylum", "class", "order", "family",
+                          "genus", "species")
+
+data_18S %>%
+  #{{import data}}
+  read_tsv() %>%
+  #{{format column names}}
+  mutate(taxonomy = str_replace_all(taxonomy, ":","_"),
+       taxonomy = str_replace_all(taxonomy, "[|]","; ")) %>%
+  #{{select samples from ROBUST project}}
+  dplyr::select(taxonomy) %>%
+    #{{"Arbuscular mycorrhizal fungi & Mucoromycotina fine root endophytes" are selected}}
+  filter(str_detect(taxonomy,"p__Glomeromycota")) %>%
+  #filter(str_detect(taxonomy,"p__Glomeromycota")) %>%
+  mutate(taxonomy = str_replace_all(taxonomy, "(p__|c__|o__|f__|g__|s__)unclassified", "*"))%>%
+  separate_wider_delim(taxonomy, names = amf_taxonomic_levels_eucaryome, delim = "; ", cols_remove = F) %>%
+  #{{select only OTUs and controls}}
+  droplevels() %>%
+  unite(taxonomy, kingdom, phylum, class, order, family,genus, sep = "; ",remove = F) %>%
+  group_by(taxonomy)%>%
+  mutate(
+    genus = paste(str_extract(
+      taxonomy,"(g_[^;*]+$)|([a-z]_[^;*]+)(?=(;\\s*\\*|\\s*\\*|$))"), # If family isn't known agglomerate a the lower taxonomic level known
+      n(),sep="_")
+  ) %>%
+  group_by(genus)%>%
+  summarise(kingdom = first(kingdom),
+            phylum = first(phylum),
+            class = first(class),
+            order = first(order),
+            family = first(family)) %>%
+    mutate(genus = genus %>%
+           str_remove("g__") %>%
+           str_replace_all("[a-z]__", "Unknown ") %>%
+           str_replace("_(\\d+)$", " (\\1 OTU)")) -> df_tip_data_genus
+  
+data_18S %>%
+  #{{import data}}
+  read_tsv() %>%
+  #{{format column names}}
+  mutate(taxonomy = str_replace_all(taxonomy, ":","_"),
+       taxonomy = str_replace_all(taxonomy, "[|]","; ")) %>%
+  #{{select samples from ROBUST project}}
+  dplyr::select(taxonomy) %>%
+    #{{"Arbuscular mycorrhizal fungi & Mucoromycotina fine root endophytes" are selected}}
+  filter(str_detect(taxonomy,"p__Glomeromycota")) %>%
+  #filter(str_detect(taxonomy,"p__Glomeromycota")) %>%
+  mutate(taxonomy = str_replace_all(taxonomy, "(p__|c__|o__|f__|g__|s__)unclassified", "*"))%>%
+  separate_wider_delim(taxonomy, names = amf_taxonomic_levels_eucaryome, delim = "; ", cols_remove = F) %>%
+  #{{select only OTUs and controls}}
+  droplevels() %>%
+  unite(taxonomy, kingdom, phylum, class, order, family, sep = "; ",remove = F) %>%
+  group_by(taxonomy)%>%
+  mutate(
+    family = paste(str_extract(
+      taxonomy,"(f[^;*]+$)|([a-z]_[^;*]+)(?=(;\\s*\\*|\\s*\\*|$))"), # If family isn't known agglomerate a the lower taxonomic level known
+      n(),sep="_")
+  ) %>%
+  group_by(family)%>%
+  summarise(kingdom = first(kingdom),
+            phylum = first(phylum),
+            class = first(class),
+            order = first(order)) %>%
+    mutate(family = family %>%
+           str_remove("f__") %>%
+           str_replace_all("[a-z]__", "Unknown ") %>%
+           str_replace("_(\\d+)$", " (\\1 OTU)"))  -> df_tip_data_family
+
+```
+
+
+```{r}
+Y_genus %>% 
+  as.data.frame() %>%
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code) %>%
+  ggplot()+
+  geom_col(aes(Sample_code, value, fill =name))+
+  scale_fill_viridis(discrete = T) +
+  main_theme_final +
+  theme(axis.text.x = element_text(angle = 45))
+```
+
+
+```{r}
+Y_genus %>% 
+  as.data.frame() %>%
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code) %>%
+  group_by(name) %>%
+  summarise(sum_rarefied_reads_log = log(sum(value))) %>%
+  left_join(df_tip_data_genus, by = join_by(name == genus)) %>%
+  mutate(family = str_remove(family, "f__")) -> sum_reads_genus_df
+
+p_tree_genus <- ggtree(genus_tree_filter, layout = "roundrect") + # %<+% sum_reads_df
+  geom_tiplab(size=3, align = T, linesize=.5) +
+  theme_tree() +
+  xlim_tree(1.2)
+
+palette_daltonien <- c(
+  "#4477AA",
+  "#DDCC77",
+  "#CC6677",
+  "#117733"
+)
+
+p_tree_genus +
+  geom_facet(panel = "Sum reads rarefied (log)", data = sum_reads_genus_df, geom = geom_col, 
+                aes(x = sum_rarefied_reads_log,
+                fill = family), orientation = 'y', width = .6) +
+  scale_fill_manual(values = palette_daltonien)+
+  main_theme_final -> tree_sum_read_plot
+
+ggsave(plot = tree_sum_read_plot, filename = "figures/tree_sum_read_plot.pdf", units = "cm",height = 11, width = 21)
+```
+
+```{r}
+Y_family %>% 
+  as.data.frame() %>%
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code) %>%
+  ggplot()+
+  geom_col(aes(Sample_code, value, fill =name))+
+  scale_fill_viridis(discrete = T) +
+  main_theme_final +
+  theme(axis.text.x = element_text(angle = 45))
+```
+
+```{r}
+Y_family %>% 
+  as.data.frame() %>%
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code) %>%
+  group_by(name) %>%
+  summarise(sum_rarefied_reads_log = log(sum(value))) %>%
+  left_join(df_tip_data_family, by = join_by(name == family)) %>%
+  mutate(family = str_remove(class, "c__")) -> sum_reads_family_df
+
+p_tree_family <- ggtree(family_tree, layout = "roundrect") + # %<+% sum_reads_df
+  geom_tiplab(size=3, align = T, linesize=.5) +
+  theme_tree() +
+  xlim_tree(1.2)
+
+palette_daltonien <- c(
+  "#4477AA",
+  "#DDCC77",
+  "#CC6677",
+  "#117733"
+)
+
+p_tree_family +
+  geom_facet(panel = "Sum reads rarefied (log)", data = sum_reads_family_df, geom = geom_col, 
+                aes(x = sum_rarefied_reads_log,
+                fill = order), orientation = 'y', width = .6) +
+  #scale_fill_manual(values = palette_daltonien)+
+  main_theme_final -> tree_sum_read_family_plot
+
+ggsave(plot = tree_sum_read_plot, filename = "figures/tree_sum_read_plot.pdf", units = "cm",height = 11, width = 21)
+```
+
