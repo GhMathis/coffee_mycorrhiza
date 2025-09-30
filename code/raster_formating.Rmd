@@ -17,6 +17,8 @@ library(raster)
 
 # Load raster
 
+## Land dégradation
+Use to crop Ugada border, not présent in the models
 
 ```{r}
 land_degradation_raster <- raster("data/raster/Uganda_ldma_2020.tif/Uganda_ldma_2020.tif")
@@ -28,16 +30,7 @@ myTheme1 <- rasterVis::rasterTheme(region = myPal1)
 rasterVis::levelplot(land_degradation_raster,par.settings = myTheme1)
 ```
 
-
-```{r}
-land_cover_raster <- raster("data/raster/Uganda_Landcover_2014_Scheme_II/Uganda_Landcover_2014_Scheme_II.tif")
-myPal2 <- pals::stepped2( n=18)
-myTheme2 <- rasterVis::rasterTheme(region = myPal2)
-
-
-rasterVis::levelplot(land_cover_raster,att ="Land_Cover", par.settings = myTheme2) 
-```
-
+## NDVI
 
 ```{r}
 ndvi_uganda <- raster("data/raster/ndvi_mean_uganda.tif")
@@ -45,7 +38,8 @@ ndvi_uganda <- raster("data/raster/ndvi_mean_uganda.tif")
 plot(ndvi_uganda)
 ```
 
-# Annual rain
+## Annual rain
+
 ```{r}
 # Define start and end
 start <- as.Date("2022-06-01")
@@ -69,7 +63,7 @@ precip_mean <- calc(rasters, mean, na.rm = TRUE)
 plot(precip_mean)
 ```
 
-# Annual T° max
+## Annual T° max
 
 ```{r}
 # Define start and end
@@ -94,7 +88,7 @@ t_max_mean <- calc(rasters, mean, na.rm = TRUE)
 plot(t_max_mean)
 ```
 
-# Annual T° min
+## Annual T° min
 
 ```{r}
 # Define start and end
@@ -118,6 +112,7 @@ rasters <- stack(files)
 t_min_mean <- calc(rasters, mean, na.rm = TRUE)
 plot(t_min_mean)
 ```
+
 ## Wind
 
 ```{r}
@@ -133,35 +128,6 @@ wind_2023 <- mean(wind_rast_sub)
 wind_2023 <- raster(wind_2023)
 plot(wind_rast_sub)
 plot(wind_2023)
-
-```
-## Wind
-
-```{r}
-elevation_rast <- raster("data/raster/wc2.1_2.5m_elev/wc2.1_2.5m_elev.tif")
-
-plot(elevation_rast)
-
-```
-
-
-```{r}
-library(sf)
-library(raster)
-library(terra)
-
-cluster_agro_sf <- read_sf("data/raster/Robust-Agroecological-Clusters/Robust Layers/Kmeans_Robust.shp")
-v <- vect(cluster_agro_sf)
-raster_template <- rast(ext(v), resolution = 0.01)
-crs(raster_template) <- crs(v)
-v$id <- 1:8
-r_raster <- rasterize(v, raster_template, field = "id")
-cluster_agro <- raster(r_raster)
-
-myPal3 <- ggsci::pal_simpsons()(8)
-myTheme3 <- rasterVis::rasterTheme(region = myPal3)
-cluster_agro <- ratify(cluster_agro)
-rasterVis::levelplot(cluster_agro, att = "ID", par.settings = myTheme3)
 
 ```
 
@@ -203,34 +169,16 @@ if(file.exists("outputs/raster/land_degradation_lower_res.tif")){
 rasterVis::levelplot(land_degradation_lower_res,par.settings = myTheme1)
 rasterVis::levelplot(land_degradation_reclassify,par.settings = myTheme1)
 
-if(file.exists("outputs/raster/land_cover_lower_res.tif")){
-  land_cover_resampled <- raster("outputs/raster/land_cover_lower_res.tif")
-} else {
-  land_cover_resampled <- raster::aggregate(land_cover_raster,fact=150,fun = modal)
-  land_cover_resampled <- raster::resample(land_cover_resampled,land_degradation_lower_res, method = "ngb")
-  land_cover_resampled <- raster::ratify(x = land_cover_resampled)
-  levels(land_cover_resampled)[[1]]$Land_Cover <- levels(land_cover_raster)[[1]]$Land_Cover
-  
-  writeRaster(land_degradation_lower_res,
-            filename = "outputs/raster/land_degradation_lower_res.grd",
-            format = "raster",
-            overwrite = TRUE)
-  writeRaster(land_cover_resampled,"outputs/raster/land_cover_lower_res.tif",options=c('TFW=YES'))
-  foreign::write.dbf(levels(land_cover_resampled)[[1]], file = "outputs/raster/land_cover_lower_res.tif.vat.dbf")
-}
-rasterVis::levelplot(land_cover_resampled,par.settings = myTheme2)
-
-
 if(file.exists("outputs/raster/ndvi_uganda_lower_res.tif")){
   ndvi_uganda_lower_res <- raster("outputs/raster/ndvi_uganda_lower_res.tif")
   }else{
   ndvi_uganda_lower_res <- raster::resample(ndvi_uganda, land_degradation_lower_res, method = "ngb")
   writeRaster(ndvi_uganda_lower_res,"outputs/raster/ndvi_uganda_lower_res.tif",options=c('TFW=YES'), overwrite=TRUE)
   }
-plot(ndvi_uganda)
 
 plot(ndvi_uganda_lower_res)
 
+###
 
 if(file.exists("outputs/raster/precip_2023_lower_res.tif")){
   precip_2023_lower_res <- raster("outputs/raster/precip_2023_lower_res.tif")
@@ -241,6 +189,8 @@ if(file.exists("outputs/raster/precip_2023_lower_res.tif")){
   }
 
 plot(precip_2023_lower_res)
+
+###
 
 if(file.exists("outputs/raster/tmax_2023_lower_res.tif")){
   tmax_2023_lower_res <- raster("outputs/raster/tmax_2023_lower_res.tif")
@@ -262,20 +212,7 @@ if(file.exists("outputs/raster/tmin_2023_lower_res.tif")){
 
 plot(tmin_2023_lower_res)
 
-if(file.exists("outputs/raster/land_cover_lower_res.tif")){
-  cluster_agro_lower_res <- raster("outputs/raster/cluster_agro_lower_res.tif")
-} else {
-  cluster_agro_resampled <- raster::resample(cluster_agro, land_degradation_lower_res, method = "ngb")
-  cluster_agro_lower_res <- mask(cluster_agro_resampled, land_degradation_lower_res)
-  cluster_agro_lower_res <- raster::ratify(x = cluster_agro_lower_res)
-  levels(cluster_agro_lower_res)[[1]]
-  levels(cluster_agro_lower_res)[[1]]$Cluster <- c("A", "B", "C", "D", "E", "F", "G", "H")
- 
-  
-  writeRaster(land_cover_resampled,"outputs/raster/land_cover_lower_res.tif",options=c('TFW=YES'))
-  foreign::write.dbf(levels(land_cover_resampled)[[1]], file = "outputs/raster/land_cover_lower_res.tif.vat.dbf")
-}
-rasterVis::levelplot(cluster_agro_lower_res,par.settings = myTheme3)
+###
 
 if(file.exists("outputs/raster/wind_2023.tif")){
   wind_2023_final <- raster("outputs/raster/wind_2023.tif")
@@ -287,23 +224,6 @@ if(file.exists("outputs/raster/wind_2023.tif")){
 
 plot(wind_2023_final)
 
-
-if(file.exists("outputs/raster/wind_2023.tif")){
-  altitude_uganda <- raster("outputs/raster/altitude_uganda.tif")
-  }else{
-  elvation_resampled <- raster::resample(elevation_rast, land_degradation_lower_res, method = "ngb")
-  altitude_uganda <- mask(elvation_resampled, land_degradation_lower_res)
-  writeRaster(altitude_uganda,"outputs/raster/altitude_uganda.tif",options=c('TFW=YES'), overwrite=TRUE)
-  }
-
-plot(altitude_uganda)
-
-for(name in c("pH.tif", "clay.tif", "nitrogen.tif", "organic_carbone.tif", "sand.tif", "silt.tif")){
-  temp_rast <- raster(file.path("data/raster/soil_data/",name))
-  temp_resampled <- raster::resample(temp_rast, land_degradation_lower_res, method = "ngb")
-  temp_resampled <- mask(temp_resampled, land_degradation_lower_res)
-  writeRaster(temp_resampled,file.path("outputs/raster/",name),options=c('TFW=YES'), overwrite=TRUE)
-}
 ```
 
 
