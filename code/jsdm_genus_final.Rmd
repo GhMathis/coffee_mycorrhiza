@@ -3,6 +3,49 @@ title: "Untitled"
 output: html_document
 date: "2025-09-22"
 ---
+# Packages
+
+
+```{r include=FALSE}
+library(tidyverse)
+library(raster)
+library(pals)
+library(viridis)
+library(Hmsc)
+
+library(ape)
+
+
+
+main_theme = theme_minimal() +
+ theme(aspect.ratio = 1,
+        axis.text.x = element_text(colour = "black", size=13, face="italic",angle =45, vjust =1, hjust =1),
+        axis.text.y = element_text(colour = "black", size=13, face="italic"),
+        axis.title = element_text(colour = "black", size=12),
+        panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+        legend.title = element_text(colour = "black", size=12,
+                                    hjust =0.5),
+
+        legend.text = element_text(colour = "black", size=13))
+
+main_theme_final = theme_bw() +
+ theme(aspect.ratio = 1,
+        axis.text.x = element_text(colour = "black", size=7, face="italic", vjust =1, hjust =1),
+        axis.text.y = element_text(colour = "black", size=7, face="italic"),
+        axis.title = element_text(colour = "black", size=9),
+        panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8),
+        #panel.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.title = element_text(colour = "black", size=9,
+                                    hjust =0.5),
+        legend.key.size = unit(0.3, 'cm'),
+        legend.text = element_text(colour = "black", size=7,face="italic"),
+        strip.background = element_blank(),
+        strip.text = element_text(margin = margin(0.05,0,0.05,0, "cm"),size = 7),
+        title = element_text(colour = "black", size=9))
+```
+
 
 # Functions
 
@@ -26,7 +69,38 @@ extract.pred.power <- function(mod_crossvalidation, mod_ID){
   abund_df
 }
 
+compute.ROC <- function(observed, predicted, pred_name){
+  df_roc_AUC = data.frame(threshold =  sort(unique(predicted)),
+                        pred_name = pred_name,
+                        precision = NA,
+                        TPR = NA,
+                        FPR = NA,
+                        F1_score = NA)
 
+  for (n in 1:nrow(df_roc_AUC)){
+    threshold <- df_roc_AUC[n,1]
+    temp_pred <- predicted > threshold
+
+  
+    TP <- sum(observed & temp_pred) # Correct positive guesses
+    TN <- sum(!(observed | temp_pred)) # Correct negative guesses
+    FP <- sum(!observed & temp_pred) # Absence in observe but presence predicted (False positive guesses)
+    FN <- sum(observed & !temp_pred) # Presence in observe but absence predicted (False negative guesses)
+    
+    
+    precision <- TP/(TP+FP) # Correct positive guesses / all positive guesses (How precise is the positive section)
+    TPR <- TP/(TP+FN) # Correct positive guesses / all true presence (How well the positives are selected)
+    FPR <- FP/(FP+TN) # False positive guesses / all true absence (How bad the negatives are selected)
+    
+    df_roc_AUC[n,"precision"] <- precision
+    df_roc_AUC[n,"TPR"] <- TPR
+    df_roc_AUC[n,"FPR"] <- FPR
+    df_roc_AUC[n,"F1_score"] <- 2*(precision*TPR)/(precision + TPR)
+    
+    
+  }
+  return(df_roc_AUC)
+}
 
 ```
 
@@ -35,22 +109,54 @@ extract.pred.power <- function(mod_crossvalidation, mod_ID){
 ## Abudance models
 
 ```{r}
-load(file = "outputs/list_mods_crossvalidation_genus_pois_log.RData")
+load(file = "outputs/models/list_mods_crossvalidation_genus_pois_log.RData")
+covariate_standa_df <- read.table("outputs/data_for_models/covariate_standa_df.txt", stringsAsFactors = T)
+Y_genus <- read.table("outputs/data_for_models/Y_genus.txt")
+genus_tree <- ape::read.tree("outputs/data_for_models/genus_tree.tree")
 ```
 
+
 ```{r}
-1:length(model_list) %>%
-  purrr::map(\(x) extract.pred.power(list_mods_crossvalidation[[x]],mod_ID = names(model_list)[x])) %>%
+genus_rename <- genus_tree$tip.label %>%
+  str_remove("g__") %>%
+  str_replace_all("[a-z]__", "Unknown ") %>%
+  str_replace("_(\\d+)$", " (\\1 OTU)")
+
+genus_tree$tip.label <- genus_rename
+
+Y_genus <- Y_genus %>%
+  rename_with(. %>%
+           str_remove("g__") %>%
+           str_replace_all("[a-z]__", "Unknown ") %>%
+           str_replace("_(\\d+)$", " (\\1 OTU)"))
+
+genus_tree$tip.label %in% colnames(Y_genus)
+Y_genus <- Y_genus[,genus_tree$tip.label]
+```
+
+
+```{r}
+model_names <- c("mod_null",
+                 "mod_ndvi",
+                 "mod_precip",
+                 "mod_tmax",
+                 "mod_wind",
+                 "mod_full",
+                 "mod_interaction",
+                 "mod_poly"
+)
+1:length(model_names) %>%
+  purrr::map(\(x) extract.pred.power(list_mods_crossvalidation[[x]],mod_ID = model_names[x])) %>%
   bind_rows() -> mods_crossvalidation_df
 
 
 
-1:length(model_list)%>%
+1:length(model_names)%>%
   purrr::map(\(x) list_mods_crossvalidation[[x]][["MF_pred"]] %>%
                as.data.frame() %>%
                mutate(genus_names = colnames(Y_genus),
-                      mod_ID = names(model_list)[x])) %>%
-  bind_rows() %>%
+                      mod_ID = model_names[x])) %>%
+  bind_rows() %>% 
   left_join(mods_crossvalidation_df %>%
               group_by(genus_names, mod_ID) %>%
               summarise(median_abund = median(true_abund, na.rm = T),
@@ -97,6 +203,11 @@ recap_pred_df %>%
   group_by(mod_ID) %>%
   summarise(RMSE_mean =round(mean(RMSE),2)) %>%
   arrange(RMSE_mean) 
+
+recap_pred_df %>%
+  group_by(mod_ID) %>%
+  summarise(RMSE_mean =round(median(RMSE),2)) %>%
+  arrange(RMSE_mean) 
 ```
 
 ```{r, purl = FALSE}
@@ -124,13 +235,13 @@ mods_crossvalidation_df %>%
 
 ```{r, purl = FALSE}
 mods_crossvalidation_df %>%
-   filter(mod_ID == "mod_pois_poly") %>%
+   filter(mod_ID == "mod_full") %>%
   group_by(genus_names) %>%
   summarise(mean_abund = mean(true_abund)) %>%
   arrange(mean_abund) %>% pull(genus_names) -> order_genus_by_abund
 
 mods_crossvalidation_df %>%
-  filter(mod_ID == "mod_pois_poly") %>%
+  filter(mod_ID == "mod_full") %>%
   mutate(genus_names = factor(genus_names, levels =  order_genus_by_abund)) %>%
   ggplot()+
   geom_point(aes(true_abund, pred_abund, fill = genus_names),alpha =0.8, shape= 21, cex = 4) +
@@ -246,42 +357,8 @@ recap_pred_bin_df %>%
   geom_point(aes(genus_names, AUC),cex = 3, alpha =0.8) +
   main_theme
 ```
+
 #### AUC-ROC curve at genus level and 
-
-```{r, purl = FALSE}
-compute.ROC <- function(observed, predicted, pred_name){
-  df_roc_AUC = data.frame(threshold =  sort(unique(predicted)),
-                        pred_name = pred_name,
-                        precision = NA,
-                        TPR = NA,
-                        FPR = NA,
-                        F1_score = NA)
-
-  for (n in 1:nrow(df_roc_AUC)){
-    threshold <- df_roc_AUC[n,1]
-    temp_pred <- predicted > threshold
-
-  
-    TP <- sum(observed & temp_pred) # Correct positive guesses
-    TN <- sum(!(observed | temp_pred)) # Correct negative guesses
-    FP <- sum(!observed & temp_pred) # Absence in observe but presence predicted (False positive guesses)
-    FN <- sum(observed & !temp_pred) # Presence in observe but absence predicted (False negative guesses)
-    
-    
-    precision <- TP/(TP+FP) # Correct positive guesses / all positive guesses (How precise is the positive section)
-    TPR <- TP/(TP+FN) # Correct positive guesses / all true presence (How well the positives are selected)
-    FPR <- FP/(FP+TN) # False positive guesses / all true absence (How bad the negatives are selected)
-    
-    df_roc_AUC[n,"precision"] <- precision
-    df_roc_AUC[n,"TPR"] <- TPR
-    df_roc_AUC[n,"FPR"] <- FPR
-    df_roc_AUC[n,"F1_score"] <- 2*(precision*TPR)/(precision + TPR)
-    
-    
-  }
-  return(df_roc_AUC)
-}
-```
 
 ```{r, purl = FALSE}
 names(list_mods_bin_crossvalidation)
@@ -358,7 +435,7 @@ ROC_curve_mod_bin_genus_full
 ### Convergence
 
 ```{r include=FALSE, purl = FALSE}
-list_mods_crossvalidation[[8]]$m_converg -> m_converg_selected # pois_full_log_NA
+list_mods_crossvalidation[[6]]$m_converg -> m_converg_selected # pois_full_log_NA
 postBeta2 <- getPostEstimate(m_converg_selected, parName = "Beta")
 beta_results <- postBeta2$mean
 mpost2 <- convertToCodaObject(m_converg_selected)
@@ -367,8 +444,8 @@ gelman_diag_df2$psrf
 
 beta_results <- postBeta2$mean
 rownames(beta_results) <- colnames(m_converg_selected$X)
-beta_results <- beta_results * ((postBeta2$support > 0.9) + (postBeta2$support < (1 - 0.9)) > 0)
-beta_results <- t(beta_results)[genus_tree_filter$tip.label, colnames(m_converg_selected$X)]
+beta_results[postBeta2$support < 0.9 & postBeta2$support > 0.1] <- NA
+beta_results <- t(beta_results)[genus_tree$tip.label, colnames(m_converg_selected$X)]
 #colnames(beta_results) <- c("Intercept","NDVI", "Rain", "tmin", "tdelta", "wind") #  "Cluster B", "Cluster C", "Cluster E", "LD Medium", "LD High", 
 ```
 
@@ -383,7 +460,7 @@ gelman_diag_bin_df2$psrf
 beta_results_bin <- postBeta2_bin$mean
 rownames(beta_results_bin) <- colnames(m_converg_selected_bin$X)
 beta_results_bin <- beta_results_bin * ((postBeta2_bin$support > 0.9) + (postBeta2_bin$support < (1 - 0.9)) > 0)
-beta_results_bin <- t(beta_results_bin)[genus_tree_filter$tip.label, colnames(m_converg_selected_bin$X)]
+beta_results_bin <- t(beta_results_bin)[genus_tree$tip.label, colnames(m_converg_selected_bin$X)]
 #colnames(beta_results) <- c("Intercept","NDVI", "Rain", "tmin", "tdelta", "wind") #  "Cluster B", "Cluster C", "Cluster E", "LD Medium", "LD High", 
 ```
 ### genus response to each varaibles
@@ -394,15 +471,15 @@ Response of abundance :
 
 ```{r echo=FALSE, purl = FALSE}
 library(ggtree)
-p <- ggtree(genus_tree_filter, layout = "roundrect") +
+p <- ggtree(genus_tree, layout = "roundrect") +
   geom_tiplab(align = TRUE, size  = 3) +
   theme_tree() 
-colnames(beta_results) = c("Intercept", "NDVI","NDVI²", "Precipitation", "Precipitation²",
-                           "T° max", "T° max²", "T° delta", "T° delta²", "Wind", "Wind²")
+colnames(beta_results) = c("Intercept", "NDVI", "Precipitation",
+                           "T° max", "T° delta", "Wind")
 
 gheatmap(p, beta_results, offset = 1, width = 1, font.size = 5,
          colnames_angle = -60, hjust = 0) +
-  scale_fill_gradient2(low = "blue", mid = "white", high = "red", na.value = "grey90",
+  scale_fill_gradient2(low = "#0039A6", mid = "white", high = "#CC0000", na.value = "grey90",
                        limits = c(min(beta_results), max(beta_results))) +
   scale_y_continuous(expand = c(0, 5)) +
   labs(fill = "Parameters\nvalues")+
@@ -417,7 +494,7 @@ ggsave(plot = effect_plot_genus_abund, filename = "figures/genus/effect_plot_gen
 
 ```{r echo=FALSE, purl = FALSE}
 library(ggtree)
-p <- ggtree(genus_tree_filter, layout = "roundrect") +
+p <- ggtree(genus_tree, layout = "roundrect") +
   geom_tiplab(align = TRUE, size  = 3) +
   theme_tree()
 colnames(beta_results_bin) = c("Intercept", "Biomass quantity index", "Precipitation", "T° max", "T° delta", "Wind")
@@ -480,7 +557,7 @@ compute.padgel.lambda <- function(models, i) {
   return(results)
 }
 
-any(branching.times(genus_tree_filter) == 0)
+any(branching.times(genus_tree) == 0)
 
 c("abund", "bin") %>%#
   purrr::map(\(x) compute.padgel.lambda(models, x)) %>%
@@ -528,6 +605,17 @@ Variance explain by each variables for each genus
 
 
 abundances: 
+```{r}
+library(colorspace)
+color_palette <- c(
+  "Biomass quantity index" = "#E69F00",  # orange
+  "Precipitation"          = "#56B4E9",  # sky blue
+  "T° max"                 = "#009E73",  # green
+  "T° delta"               = "#F0E442",  # yellow
+  "Wind"                   = "#0072B2",  # blue
+  "Variance not explained" = "#999999"   # gray
+)
+```
 
 ```{r echo=FALSE, warning=FALSE, purl = FALSE}
 VP2 <- computeVariancePartitioning(m_converg_selected, na.ignore = TRUE)
@@ -536,23 +624,25 @@ VP2 <- computeVariancePartitioning(m_converg_selected, na.ignore = TRUE)
 VP2$vals %>%
   as.data.frame() %>%
   rownames_to_column("var") %>%
-  mutate( var = case_when(var == "poly(ndvi, 2)" ~ "Biomass quantity index",
-                         var == "poly(precip, 2)" ~ "Precipitation",
-                         var == "poly(tmax, 2)" ~ "T° max",
-                         var == "poly(tdelta, 2)" ~ "T° delta",
-                         var == "poly(wind, 2)" ~ "Wind",
+  mutate( var = case_when(var == "ndvi" ~ "Biomass quantity index",
+                         var == "precip" ~ "Precipitation",
+                         var == "tmax" ~ "T° max",
+                         var == "tdelta" ~ "T° delta",
+                         var == "wind" ~ "Wind",
                          .default= var),
-          var = factor(var, levels = c("Biomass quantity index", "Precipitation", "T° max", "T° delta", "Wind", "Random: sample"))) %>%
+          var = factor(var, levels = c("Biomass quantity index", "Precipitation", "T° max", "T° delta", "Wind", "Random: sample")))%>%
   pivot_longer(-var) %>%
   ggplot() +
   geom_col(aes(x = name, y = value, fill = var)) +
   labs(x= "genus names", y = "Variance", fill = "Covariates")+
-  scale_fill_viridis(discrete = T)+
+  scale_fill_manual(values = color_palette)+
   main_theme_final +
   theme(axis.text.x = element_text(angle = 45)) -> variance_partitioning_abund_genus
-variance_partitioning_abund_genus
+
 ggsave(plot = variance_partitioning_abund_genus, filename = "figures/genus/variance_partitioning_abund_genus.pdf", units = "cm",
         height = 16, width = 16)
+
+variance_partitioning_abund_genus
 
 ```
 
@@ -614,7 +704,14 @@ corrplot(toPlot, method = "color", col = colorRampPalette(c("blue", "white", "re
          mar = c(0, 0, 1, 0), order = "hclust")
 ```
 
+
 ```{r echo=FALSE, purl = FALSE}
+ndvi_uganda <- raster("outputs/raster/ndvi_uganda_lower_res.tif")
+precip_uganda_resampled <- raster("outputs/raster/precip_2023_lower_res.tif")
+tmax_uganda_resampled <- raster("outputs/raster/tmax_2023_lower_res.tif")
+tmin_uganda_resampled <- raster("outputs/raster/tmin_2023_lower_res.tif")
+delta_t_uganda <- tmax_uganda_resampled -tmin_uganda_resampled
+wind_2023 <- raster("outputs/raster/wind_2023.tif")
 
 ndvi_raster_df <- rasterToPoints(ndvi_uganda) %>%
   as.data.frame() %>%
@@ -807,19 +904,23 @@ xy.grid <- data_spatial_df %>%
 XData.grid <- data_spatial_df %>%
   dplyr::select(-c(x, y))
 
-Gradient <-  prepareGradient(list_mods_crossvalidation[[6]]$hmsc_mod, XDataNew = XData.grid, sDataNew = list(route = xy.grid))
-predY <- stats::predict(m_converg_selected, Gradient = Gradient)
-
-EpredY_map <- predY[[1]]
-
-
-# Average over predictions
-if (length(predY) > 1) {
-  for (i in 2:length(predY)) {
-    EpredY_map <- EpredY_map + predY[[i]]
-    if (i %% 1000 == 0) print(i)
+if(file.exists("outputs/models/abundance_prediction_map_genus.RData")){
+  load("outputs/models/abundance_prediction_map_genus.RData")
+}else{Gradient <-  prepareGradient(list_mods_crossvalidation[[6]]$hmsc_mod, XDataNew = XData.grid, sDataNew = list(route = xy.grid))
+  predY <- stats::predict(m_converg_selected, Gradient = Gradient)
+  
+  EpredY_map <- predY[[1]]
+  
+  
+  # Average over predictions
+  if (length(predY) > 1) {
+    for (i in 2:length(predY)) {
+      EpredY_map <- EpredY_map + predY[[i]]
+      if (i %% 1000 == 0) print(i)
+    }
+    EpredY_map <- EpredY_map / length(predY)
   }
-  EpredY_map <- EpredY_map / length(predY)
+  save(EpredY_map,file = "outputs/models/abundance_prediction_map_genus.RData")
 }
 ```
 

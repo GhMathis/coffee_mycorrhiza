@@ -36,7 +36,25 @@ if(test_run){
 ```{r cars}
 covariate_standa_df <- read.table("outputs/data_for_models/covariate_standa_df.txt", stringsAsFactors = T)
 Y_genus <- read.table("outputs/data_for_models/Y_genus.txt")
-genus_tree <- ape::read.tree("outputs/phylo_tree/Robust_MiSeq_18S_AMf_20241120_125_samples_Eukaryome_Glomeromycota_genus.tree")
+genus_tree <- ape::read.tree("outputs/data_for_models/genus_tree.tree")
+```
+
+```{r}
+genus_rename <- genus_tree$tip.label %>%
+  str_remove("g__") %>%
+  str_replace_all("[a-z]__", "Unknown ") %>%
+  str_replace("_(\\d+)$", " (\\1 OTU)")
+
+genus_tree$tip.label <- genus_rename
+
+Y_genus <- Y_genus %>%
+  rename_with(. %>%
+           str_remove("g__") %>%
+           str_replace_all("[a-z]__", "Unknown ") %>%
+           str_replace("_(\\d+)$", " (\\1 OTU)"))
+
+genus_tree$tip.label %in% colnames(Y_genus)
+Y_genus <- Y_genus[,genus_tree$tip.label ]
 ```
 
 ## Models
