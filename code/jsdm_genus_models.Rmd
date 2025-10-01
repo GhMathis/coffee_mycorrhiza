@@ -1,0 +1,320 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-10-01"
+---
+
+```{r setup, include=FALSE,purl = T}
+knitr::opts_chunk$set(purl = T)
+```
+
+# Packages
+
+```{r}
+library(tidyverse)
+library(Hmsc)
+library(ape)
+```
+
+
+# Setup
+
+```{r}
+test_run = T
+# test_run = F
+if(test_run){
+  nfolds = 2
+  nChains = 2
+}else{
+  nfolds =10
+  nChains = 10
+}
+```
+
+# Load data
+
+```{r cars}
+covariate_standa_df <- read.table("outputs/data_for_models/covariate_standa_df.txt", stringsAsFactors = T)
+Y_genus <- read.table("outputs/data_for_models/Y_genus.txt")
+genus_tree <- ape::read.tree("outputs/phylo_tree/Robust_MiSeq_18S_AMf_20241120_125_samples_Eukaryome_Glomeromycota_genus.tree")
+```
+
+## Models
+
+```{r echo=FALSE}
+studyDesign <- data.frame(sample = rownames(Y_genus), stringsAsFactors = TRUE)
+rL <- HmscRandomLevel(units = studyDesign$sample)
+```
+
+```{r echo=FALSE}
+mod_pois_null <- Hmsc(
+  Y = log1p(Y_genus),
+  XData =  covariate_standa_df,
+  XFormula = ~ 1,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "poisson"
+)
+
+
+mod_pois_ndvi <- Hmsc(
+  Y = log1p(Y_genus),
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "poisson"
+)
+
+
+mod_pois_precip <- Hmsc(
+  Y = log1p(Y_genus),
+  XData = covariate_standa_df,
+  XFormula = ~ precip,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "poisson"
+)
+
+mod_pois_tmax <- Hmsc(
+  Y = log1p(Y_genus),
+  XData =  covariate_standa_df,
+  XFormula = ~ tmax,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "poisson"
+)
+
+mod_pois_wind  <- Hmsc(
+  Y = log1p(Y_genus),
+  XData = covariate_standa_df,
+  XFormula = ~ wind,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "poisson"
+)
+
+mod_pois_full <- Hmsc(
+  Y = log1p(Y_genus),
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "poisson"
+)
+
+mod_pois_interaction <- Hmsc(
+  Y = log1p(Y_genus),
+  XData = covariate_standa_df,
+  XFormula = ~ (ndvi + precip + tmax +tdelta + wind)^2,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "poisson"
+)
+
+mod_pois_poly <- Hmsc(
+  Y = log1p(Y_genus),
+  XData = covariate_standa_df,
+  XFormula = ~poly(ndvi,2) + poly(precip,2) + poly(tmax,2) + poly(tdelta,2) + poly(wind,2),
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "poisson"
+)
+
+
+model_list <- list(
+  mod_pois_null = mod_pois_null,
+  mod_pois_ndvi      = mod_pois_ndvi,
+  mod_pois_precip    = mod_pois_precip,
+  mod_pois_tmax      = mod_pois_tmax,
+  mod_pois_wind      = mod_pois_wind,
+  mod_pois_full = mod_pois_full,
+  mod_pois_interaction = mod_pois_interaction,
+  mod_pois_poly = mod_pois_poly
+)
+```
+
+
+```{r echo=FALSE}
+compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 10,   test.run = T){
+
+  if (test.run){
+    #with this option, the vignette runs fast but results are not reliable
+    thin = 5
+    samples = 20
+    transient = 5*thin
+    verbose = 5*thin
+  } else {
+    #with this option, the vignette evaluates slow but it reproduces the results of the
+    #.pdf version
+    thin = 10
+    samples = 2000
+    transient = 1000*thin
+    verbose = 1000*thin
+  }
+  
+  m_converg <- sampleMcmc(
+    hmsc_mod,
+    thin = thin, samples = samples, transient = transient,
+    nChains = nChains, verbose = verbose, nParallel = nChains)
+  
+  set.seed(92828)
+  partition = createPartition(m_converg, nfolds = nfold, column = "sample")
+  
+  expl_power = computePredictedValues(m_converg, thin = thin, nParallel = nChains)
+  MF_expl = evaluateModelFit(hM = m_converg, predY = expl_power) 
+  
+  #Predictive power based on cross-validation  
+
+  pred_power = computePredictedValues(m_converg, partition = partition, thin = thin, nParallel = nChains)
+  MF_pred = evaluateModelFit(hM = m_converg, predY = pred_power)
+  
+  mPredY <- apply(abind::abind(pred_power, along = 3), c(1, 2), matrixStats::mean2)
+  
+  colnames(mPredY) <- colnames(m_converg$Y)
+  rownames(mPredY) <- rownames(m_converg$Y)
+  
+  list(hmsc_mod = hmsc_mod, m_converg = m_converg , mPredY = mPredY, MF_expl = MF_expl, MF_pred = MF_pred)
+  }
+```
+
+
+```{r}
+1:length(model_list) %>%
+  purrr::map(\(x) compute.hmsc(model_list[[x]], nfold = nfolds, nChains = nChains,   test.run = test_run)) -> list_mods_crossvalidation
+
+if(file.exists("outputs/models/list_mods_crossvalidation_genus_pois_log.RData")){
+  save(list_mods_crossvalidation, file = "outputs/models/list_mods_crossvalidation_genus_pois_log_safesave.RData")
+  }else{
+  save(list_mods_crossvalidation, file = "outputs/models/list_mods_crossvalidation_genus_pois_log.RData")
+}
+
+```
+
+# Occurence model
+
+```{r}
+Y_genus_bin <- Y_genus %>%
+  as.data.frame() %>%
+  rownames_to_column("soil_code") %>%
+  pivot_longer(-soil_code) %>%
+  mutate(value = ifelse(value == 0, 0, 1)) %>%
+  pivot_wider(names_from = name, values_from = value) %>%
+  column_to_rownames("soil_code")
+```
+
+
+```{r echo=FALSE}
+mod_bin_null <- Hmsc(
+  Y = Y_genus_bin,
+  XData =  covariate_standa_df ,
+  XFormula = ~ 1,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+mod_bin_ndvi <- Hmsc(
+  Y = Y_genus_bin,
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+
+mod_bin_precip <- Hmsc(
+  Y = Y_genus_bin,
+  XData = covariate_standa_df,
+  XFormula = ~ precip,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+mod_bin_tmax <- Hmsc(
+  Y = Y_genus_bin,
+  XData =  covariate_standa_df,
+  XFormula = ~ tmax,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+mod_bin_wind  <- Hmsc(
+  Y = Y_genus_bin,
+  XData = covariate_standa_df,
+  XFormula = ~ wind,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+mod_bin_full <- Hmsc(
+  Y = Y_genus_bin,
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+mod_bin_interaction <- Hmsc(
+  Y = Y_genus_bin,
+  XData = covariate_standa_df,
+  XFormula = ~ (ndvi + precip + tmax +tdelta + wind)^2,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+mod_bin_poly <- Hmsc(
+  Y = Y_genus_bin,
+  XData = covariate_standa_df,
+  XFormula = ~poly(ndvi,2) + poly(precip,2) + poly(tmax,2) + poly(tdelta,2) + poly(wind,2),
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "probit"
+)
+
+
+
+model_bin_list <- list(
+  mod_bin_null      = mod_bin_null,
+  mod_bin_ndvi      = mod_bin_ndvi,
+  mod_bin_precip    = mod_bin_precip,
+  mod_bin_tmax      = mod_bin_tmax,
+  mod_bin_wind      = mod_bin_wind,
+  mod_bin_full      = mod_bin_full,
+  mod_bin_interaction = mod_bin_interaction,
+  mod_bin_poly      = mod_bin_poly
+)
+```
+
+```{r}
+1:length(model_bin_list) %>%
+  purrr::map(\(x) compute.hmsc(model_bin_list[[x]], nfold = nfolds, nChains = nChains,   test.run = test_run)) -> list_mods_bin_crossvalidation
+
+if(file.exists("outputs/models/list_mods_bin_crossvalidation_genus.RData")){
+  save(list_mods_bin_crossvalidation, file = "outputs/models/list_mods_bin_crossvalidation_genus_safesave.RData")
+  }else{
+  save(list_mods_bin_crossvalidation, file = "outputs/models/list_mods_bin_crossvalidation_genus.RData")
+}
+```
