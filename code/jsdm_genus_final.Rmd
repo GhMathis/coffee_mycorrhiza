@@ -3,8 +3,8 @@ title: "Untitled"
 output: html_document
 date: "2025-09-22"
 ---
-# Packages
 
+# Packages
 
 ```{r include=FALSE}
 library(tidyverse)
@@ -14,8 +14,9 @@ library(viridis)
 library(Hmsc)
 
 library(ape)
-
-
+library(ggtree)
+library(nlme)
+library(ggspatial)
 
 main_theme = theme_minimal() +
  theme(aspect.ratio = 1,
@@ -45,7 +46,6 @@ main_theme_final = theme_bw() +
         strip.text = element_text(margin = margin(0.05,0,0.05,0, "cm"),size = 7),
         title = element_text(colour = "black", size=9))
 ```
-
 
 # Functions
 
@@ -262,21 +262,20 @@ ggsave(plot = vaildation_mod_abund_genus_full, filename = "figures/genus/vaildat
 ## Occurence models
 
 ```{r}
-load(file = "outputs/list_mods_bin_crossvalidation_genus2.RData")
+load(file = "outputs/models/list_mods_bin_crossvalidation_genus2.RData")
 ```
 
 ```{r, purl = FALSE}
-
-1:length(model_bin_list) %>%
-  purrr::map(\(x) extract.pred.power(list_mods_bin_crossvalidation[[x]],mod_ID = names(model_bin_list)[x])) %>%
+1:length(model_names) %>%
+  purrr::map(\(x) extract.pred.power(list_mods_bin_crossvalidation[[x]],mod_ID = model_names[x])) %>%
   bind_rows() -> mods_bin_crossvalidation_df
 
 
-1:length(model_bin_list)%>%
+1:length(model_names)%>%
   purrr::map(\(x) list_mods_bin_crossvalidation[[x]][["MF_pred"]] %>%
                as.data.frame %>%
                mutate(genus_names = colnames(Y_genus),
-                      mod_ID = names(model_bin_list)[x])) %>%
+                      mod_ID = model_names[x])) %>%
   bind_rows() %>%
   left_join( mods_bin_crossvalidation_df %>%
     group_by(genus_names,mod_ID) %>%
@@ -334,7 +333,7 @@ mods_bin_crossvalidation_df %>%
 
 
 mods_bin_crossvalidation_df %>%
-  filter(mod_ID == "mod_bin_full") %>%
+  filter(mod_ID == "mod_full") %>%
   ggplot()+
   facet_wrap(~genus_names) +
   geom_point(aes(pred_abund,true_abund)) +
@@ -344,7 +343,7 @@ mods_bin_crossvalidation_df %>%
   main_theme
 
 recap_pred_bin_df %>%
-  filter(mod_ID == "mod_bin_full") %>%
+  filter(mod_ID == "mod_full") %>%
   ggplot() +
   geom_abline(slope=1) +
   geom_point(aes(mean_abund, mean_pred, col = genus_names), cex =3)+
@@ -352,7 +351,7 @@ recap_pred_bin_df %>%
   main_theme
 
 recap_pred_bin_df %>%
-  filter(mod_ID == "mod_bin_full") %>%
+  filter(mod_ID == "mod_full") %>%
   ggplot() +
   geom_point(aes(genus_names, AUC),cex = 3, alpha =0.8) +
   main_theme
@@ -361,7 +360,7 @@ recap_pred_bin_df %>%
 #### AUC-ROC curve at genus level and 
 
 ```{r, purl = FALSE}
-names(list_mods_bin_crossvalidation)
+
 1:ncol(Y_genus) %>%
   map(\(x) compute.ROC(observed =  list_mods_bin_crossvalidation[[6]]$m_converg$Y[,x], predicted = list_mods_bin_crossvalidation[[6]]$mPredY[,x],
             pred_name = colnames(list_mods_bin_crossvalidation[[6]]$m_converg$Y)[x])) %>%
@@ -415,9 +414,9 @@ ROC_df %>%
   facet_wrap(~pred_name) +
   geom_path(aes(x=FPR,y=TPR), size=1) +
   #geom_ribbon(aes(x = FPR, y = TPR, ymin = 0, ymax = TPR), inherit.aes = TRUE, alpha = 0.25, fill = "grey50") +
-  geom_vline(aes(xintercept = FPR_b), col = "blue", linetype = 2, linewidth =  1.5)+
-  geom_hline(aes(yintercept = TPR_b), col = "blue", linetype = 2, linewidth =  1.5)+
-  geom_text(aes(x =0.7 ,y=0.1,label = paste("threshold =", round(threshold_B,2))), col = "blue", size = 2)+
+  geom_vline(aes(xintercept = FPR_b), col = "blue", linetype = 2, linewidth =  1)+
+  geom_hline(aes(yintercept = TPR_b), col = "blue", linetype = 2, linewidth =  1)+
+  geom_text(aes(x =0.7 ,y=0.1,label = paste("threshold =", round(threshold_B,2))), col = "blue", size = 1.5)+
   #geom_vline(aes(xintercept=threshold_F1), col = "red")+
   coord_cartesian(xlim = c(0,1), ylim=c(0,1.01), expand = FALSE) +
   geom_abline( linetype='dashed') +
@@ -444,9 +443,8 @@ gelman_diag_df2$psrf
 
 beta_results <- postBeta2$mean
 rownames(beta_results) <- colnames(m_converg_selected$X)
-beta_results[postBeta2$support < 0.9 & postBeta2$support > 0.1] <- NA
+beta_results[!(postBeta2$support > 0.9 | postBeta2$support < 0.1)] <- NA
 beta_results <- t(beta_results)[genus_tree$tip.label, colnames(m_converg_selected$X)]
-#colnames(beta_results) <- c("Intercept","NDVI", "Rain", "tmin", "tdelta", "wind") #  "Cluster B", "Cluster C", "Cluster E", "LD Medium", "LD High", 
 ```
 
 ```{r include=FALSE, purl = FALSE}
@@ -459,9 +457,9 @@ gelman_diag_bin_df2$psrf
 
 beta_results_bin <- postBeta2_bin$mean
 rownames(beta_results_bin) <- colnames(m_converg_selected_bin$X)
-beta_results_bin <- beta_results_bin * ((postBeta2_bin$support > 0.9) + (postBeta2_bin$support < (1 - 0.9)) > 0)
+
+beta_results_bin[!(postBeta2_bin$support > 0.9 | postBeta2_bin$support < 0.1)] <- NA
 beta_results_bin <- t(beta_results_bin)[genus_tree$tip.label, colnames(m_converg_selected_bin$X)]
-#colnames(beta_results) <- c("Intercept","NDVI", "Rain", "tmin", "tdelta", "wind") #  "Cluster B", "Cluster C", "Cluster E", "LD Medium", "LD High", 
 ```
 ### genus response to each varaibles
 
@@ -470,10 +468,10 @@ Estimated response of each genus to environmental variable with phylogenetic tre
 Response of abundance :
 
 ```{r echo=FALSE, purl = FALSE}
-library(ggtree)
 p <- ggtree(genus_tree, layout = "roundrect") +
   geom_tiplab(align = TRUE, size  = 3) +
   theme_tree() 
+
 colnames(beta_results) = c("Intercept", "NDVI", "Precipitation",
                            "T° max", "T° delta", "Wind")
 
@@ -486,22 +484,23 @@ gheatmap(p, beta_results, offset = 1, width = 1, font.size = 5,
   main_theme_final+
   theme_void() -> effect_plot_genus_abund
 
-effect_plot_genus_abund
-
 ggsave(plot = effect_plot_genus_abund, filename = "figures/genus/effect_plot_genus_abund.pdf", units = "cm",
         height = 18, width = 20)
+
+effect_plot_genus_abund
 ```
 
 ```{r echo=FALSE, purl = FALSE}
-library(ggtree)
 p <- ggtree(genus_tree, layout = "roundrect") +
   geom_tiplab(align = TRUE, size  = 3) +
   theme_tree()
+
 colnames(beta_results_bin) = c("Intercept", "Biomass quantity index", "Precipitation", "T° max", "T° delta", "Wind")
+
 gheatmap(p, beta_results_bin, offset = 1, width = 1, font.size = 5,
          colnames_angle = -60, hjust = 0) +
-  scale_fill_gradient2(low = "blue", mid = "white", high = "red", na.value = "grey90",
-                       limits = c(min(beta_results_bin), max(beta_results_bin))) +
+  scale_fill_gradient2(low = "#0039A6", mid = "white", high = "#CC0000", na.value = "grey90",
+                       limits = c(min(beta_results), max(beta_results))) +
   scale_y_continuous(expand = c(0, 5)) +
   labs(fill = "Parameters\nvalues", titl=" Occurence model")+
   main_theme_final+
@@ -509,6 +508,8 @@ gheatmap(p, beta_results_bin, offset = 1, width = 1, font.size = 5,
 
 ggsave(plot = effect_plot_genus_bin, filename = "figures/genus/effect_plot_genus_bin.pdf", units = "cm",
         height = 18, width = 20)
+
+effect_plot_genus_bin
 ```
 
 ### Phylogenetic signal
@@ -519,14 +520,18 @@ Abundances :
 gelman.diag(mpost2$Rho)$psrf
 summary(mpost2$Rho)
 ```
+Occurrence :
+
+```{r echo=FALSE, purl = FALSE}
+gelman.diag(mpost2_bin$Rho)$psrf
+summary(mpost2_bin$Rho)
+```
 
 ```{r include=FALSE, purl = FALSE}
-library(nlme)
-library(purrr)
 # ------------------------------------------------------------------
 # Compute Pagel's lambda for each covariate via nlme gls + corPagel
 # ------------------------------------------------------------------
-models <- list(abund = list_mods_crossvalidation[[8]]$m_converg, bin = list_mods_bin_crossvalidation[[6]]$m_converg) # , 
+models <- list(abund = list_mods_crossvalidation[[6]]$m_converg, bin = list_mods_bin_crossvalidation[[6]]$m_converg) # , 
 
 compute.padgel.lambda <- function(models, i) {
   m <- models[[i]]
@@ -602,11 +607,9 @@ phylogentic_signal_genus_models
 ### Variance partitonning
 
 Variance explain by each variables for each genus
-
-
 abundances: 
+
 ```{r}
-library(colorspace)
 color_palette <- c(
   "Biomass quantity index" = "#E69F00",  # orange
   "Precipitation"          = "#56B4E9",  # sky blue
@@ -619,7 +622,6 @@ color_palette <- c(
 
 ```{r echo=FALSE, warning=FALSE, purl = FALSE}
 VP2 <- computeVariancePartitioning(m_converg_selected, na.ignore = TRUE)
-
 
 VP2$vals %>%
   as.data.frame() %>%
@@ -634,8 +636,8 @@ VP2$vals %>%
   pivot_longer(-var) %>%
   ggplot() +
   geom_col(aes(x = name, y = value, fill = var)) +
-  labs(x= "genus names", y = "Variance", fill = "Covariates")+
-  scale_fill_manual(values = color_palette)+
+  labs(x= "genus names", y = "Variance", fill = "Covariates") +
+  scale_fill_manual(values = color_palette) +
   main_theme_final +
   theme(axis.text.x = element_text(angle = 45)) -> variance_partitioning_abund_genus
 
@@ -664,7 +666,7 @@ VP2_bin$vals %>%
   ggplot() +
   geom_col(aes(x = name, y = value, fill = var)) +
   labs(x= "genus names", y = "Variance", fill = "Covariates")+
-  scale_fill_viridis(discrete = T)+
+  scale_fill_manual(values = color_palette)+
   main_theme_final +
   theme(axis.text.x = element_text(angle = 45)) -> variance_partionning_occurence
 
@@ -742,6 +744,41 @@ data_spatial_df <- ndvi_raster_df %>%
   mutate(across(c(ndvi, precip, tmax, tdelta, wind), ~vegan::decostand(.x, method = "standardize")[,1]))
 ```
 
+# Get taxonomy
+```{r}
+data_18S <- "data/18S_AMf_Eukaryome/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.table2"
+amf_taxonomic_levels_eucaryome <- c("kingdom", "phylum", "class", "order", "family",
+                          "genus", "species")
+
+taxomony_AMF_genuslevel <- data_18S %>%
+  #{{import data}}
+  read_tsv() %>%
+  dplyr::select(taxonomy) %>%
+  mutate(taxonomy = str_replace_all(taxonomy, ":","_"),
+    taxonomy = str_replace_all(taxonomy, "[|]","; ")) %>%
+  filter(str_detect(taxonomy,"p__Glomeromycota")) %>%
+  #filter(str_detect(taxonomy,"p__Glomeromycota")) %>%
+  mutate(taxonomy = str_replace_all(taxonomy, "(p__|c__|o__|f__|g__|s__)unclassified", "*"))%>%
+  separate_wider_delim(taxonomy, names = amf_taxonomic_levels_eucaryome, delim = "; ", cols_remove = F) %>%
+  unite(taxonomy, kingdom, phylum, class, order, family,genus, sep = "; ",remove = F) %>%
+    group_by(taxonomy)%>%
+    mutate(
+      genus = paste(str_extract(
+        taxonomy,"(g_[^;*]+$)|([a-z]_[^;*]+)(?=(;\\s*\\*|\\s*\\*|$))"), # If family isn't known agglomerate a the lower taxonomic level known
+        n(),sep="_")
+    ) %>%
+    group_by(genus)%>%
+    summarise(kingdom = first(kingdom),
+              phylum = first(phylum),
+              class = first(class),
+              order = first(order),
+              family = first(family)) %>%
+    mutate(genus = genus %>%
+           str_remove("g__") %>%
+           str_replace_all("[a-z]__", "Unknown ") %>%
+           str_replace("_(\\d+)$", " (\\1 OTU)"))
+```
+
 # Occurence
 
 ```{r, purl = FALSE}
@@ -759,30 +796,35 @@ xy.grid <- data_spatial_df %>%
 XData.grid <- data_spatial_df %>%
   dplyr::select(-c(x, y))
 
-Gradient <-  prepareGradient(list_mods_bin_crossvalidation[[6]]$hmsc_mod, XDataNew = XData.grid, sDataNew = list(route = xy.grid))
-predY_bin <- stats::predict(m_converg_selected_bin, Gradient = Gradient)
-
-EpredY_bin_map <- predY_bin[[1]]
-
-str(predY_bin)
-# Average over predictions
-if (length(predY_bin) > 1) {
-  for (i in 2:length(predY_bin)) {
-    EpredY_bin_map <- EpredY_bin_map + predY_bin[[i]]
-    if (i %% 1000 == 0) print(i)
+if(file.exists("outputs/models/occurence_prediction_map_genus.RData")){
+  load("outputs/models/occurence_prediction_map_genus.RData")
+}else{
+  Gradient <-  prepareGradient(list_mods_bin_crossvalidation[[6]]$hmsc_mod, XDataNew = XData.grid, sDataNew = list(route = xy.grid))
+  predY_bin <- stats::predict(m_converg_selected_bin, Gradient = Gradient)
+  
+  EpredY_bin_map <- predY_bin[[1]]
+  
+  str(predY_bin)
+  # Average over predictions
+  if (length(predY_bin) > 1) {
+    for (i in 2:length(predY_bin)) {
+      EpredY_bin_map <- EpredY_bin_map + predY_bin[[i]] 
+      if (i %% 1000 == 0) print(i)
+    }
+    EpredY_bin_map <- EpredY_bin_map / length(predY_bin)
   }
-  EpredY_bin_map <- EpredY_bin_map / length(predY_bin)
+  save(EpredY_bin_map, file = "outputs/models/occurence_prediction_map_genus.RData")
 }
+
 ```
 
 ```{r}
 recap_pred_bin_df %>%
-  filter(mod_ID == "mod_bin_full", AUC >0.75| is.na(AUC)) %>% #, genus_names!="Diversisporaceae (36 OTU)"
+  filter(mod_ID == "mod_full", AUC >0.75| is.na(AUC)) %>% #, genus_names!="Diversisporaceae (36 OTU)"
   pull(genus_names) -> good_occurence_prediction
 ```
 
 ```{r, purl = FALSE}
-
 balanced_score_df
 balanced_score_df$pred_name == colnames(EpredY_bin_map)
 EpredY_bin_map <- EpredY_bin_map[,balanced_score_df$pred_name]
@@ -794,19 +836,21 @@ EpredY_occurance_map <- +EpredY_occurance_map
 ```
 
 
-```{r}
-library(ggspatial)  # fonctions annotation_map_tile
+```{r, purl = FALSE}
+data_spatial_df %>%
+  bind_cols(EpredY_occurance_map) %>%
+  mutate(pixel_ID = as.factor(1:n())) %>%
+  pivot_longer(-c(pixel_ID,x, y, ndvi, precip, tmax, tdelta, wind), values_to = "occurence", names_to = "genus") %>%
+  mutate(occurence = as.factor(occurence)) %>%
+  left_join(taxomony_AMF_genuslevel, by = "genus") -> EpredY_occurance_df
 ```
 
 
 ```{r, purl = FALSE}
-data_spatial_df %>%
-    bind_cols(EpredY_occurance_map) %>%
-    pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
-    mutate(value = as.factor(value)) %>%
-    ggplot() +
-    facet_wrap(~name) +
-    geom_raster(aes(x, y, fill = value)) +
+EpredY_occurance_df %>%
+  ggplot() +
+    facet_wrap(~genus) +
+    geom_raster(aes(x, y, fill = occurence)) +
     scale_fill_viridis(discrete = T, option = "viridis", begin = 0.05, end = 0.6) +
      labs(x = "Longitude", y = "Latitude", fill = "Occurence") + 
     theme_classic() +
@@ -818,12 +862,8 @@ data_spatial_df %>%
       axis.title.y = element_text(colour = "black", size = 14, face = "italic")
     ) -> map_occurence_allgenus
 
-data_spatial_df %>%
-    bind_cols(EpredY_occurance_map) %>%
-    pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
-    filter(name %in% good_occurence_prediction) %>%
-    mutate(value = as.factor(value)) %>%
-    ggplot() +
+EpredY_occurance_df %>%
+  ggplot() +
     facet_wrap(~name) +
     geom_raster(aes(x, y, fill = value)) +
     scale_fill_viridis(discrete = T, option = "viridis", begin = 0.05, end = 0.6) +
@@ -837,30 +877,31 @@ data_spatial_df %>%
       axis.title.y = element_text(colour = "black", size = 14, face = "italic")
     ) -> map_occurence_best_predicted_genus
 
-data_spatial_df %>%
-    bind_cols(data.frame(richness= rowSums(EpredY_occurance_map))) %>%
 
-    pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
-
-    mutate(value = value) %>%
+EpredY_occurance_df %>%
+  filter(!str_detect(genus, "Unknown")) %>%
+  group_by(pixel_ID) %>%
+  summarise(richness = sum(as.numeric(as.character(occurence))),
+            x = first(x),
+            y = first(y)) %>%
     ggplot() +
-    #facet_wrap(~name) +
-    geom_raster(aes(x, y, fill = value)) +
-    annotation_north_arrow(
-      location = "tr", 
-      which_north = "true", 
-      height = unit(1, "cm"), 
-      width  = unit(1, "cm"),
-      style = north_arrow_minimal(
-        line_col = "black",   # outline color
-        fill     = "black",
-        text_col = "black",
-        line_width = 2, 
-        text_size  = 10 
-      )) +
-    scale_fill_viridis(option = "magma") +
-    labs(x = "Longitude", y = "Latitude", fill = "genus richness") + 
-    main_theme_final -> map_richness
+      #facet_wrap(~name) +
+      geom_raster(aes(x, y, fill = richness)) +
+      annotation_north_arrow(
+        location = "tr",
+        which_north = "true",
+        height = unit(1, "cm"),
+        width  = unit(1, "cm"),
+        style = north_arrow_minimal(
+          line_col = "black",   # outline color
+          fill     = "black",
+          text_col = "black",
+          line_width = 2,
+          text_size  = 10
+        )) +
+      scale_fill_viridis(option = "magma") +
+      labs(x = "Longitude", y = "Latitude", fill = "Knonwn genus richness") +
+      main_theme_final -> map_richness
 
 map_occurence_allgenus
 map_occurence_best_predicted_genus
@@ -906,7 +947,8 @@ XData.grid <- data_spatial_df %>%
 
 if(file.exists("outputs/models/abundance_prediction_map_genus.RData")){
   load("outputs/models/abundance_prediction_map_genus.RData")
-}else{Gradient <-  prepareGradient(list_mods_crossvalidation[[6]]$hmsc_mod, XDataNew = XData.grid, sDataNew = list(route = xy.grid))
+}else{
+  Gradient <-  prepareGradient(list_mods_crossvalidation[[6]]$hmsc_mod, XDataNew = XData.grid, sDataNew = list(route = xy.grid))
   predY <- stats::predict(m_converg_selected, Gradient = Gradient)
   
   EpredY_map <- predY[[1]]
@@ -928,147 +970,84 @@ if(file.exists("outputs/models/abundance_prediction_map_genus.RData")){
 
 ```{r, purl = FALSE}
 summary(EpredY_map)
+
 EpredY_map %>%
   as.data.frame() %>%
   pivot_longer(everything()) %>%
   group_by(name) %>%
-  summarise(max_values = max(value)) %>%
-  arrange(desc(max_values)) 
+  summarise(mean_values = max(value)) %>%
+  arrange(desc(mean_values)) -> max_predY_df
 ```
 
 
 ```{r, purl = FALSE}
 data_spatial_df %>%
-    bind_cols(EpredY_map) %>%
-    pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
-    mutate(value = value) %>%
-    ggplot() +
-    facet_wrap(~name) +
-    geom_raster(aes(x, y, fill = value)) +
-    scale_fill_viridis(option = "magma") +
-    labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
-    main_theme_final -> abundance_Glomeraceae_map
-
-ggsave(plot = abundance_Glomeraceae_map, filename = "figures/genus/abundance_Glomeraceae_map.pdf", units = "cm", width = 18 ,height = 18 )
-abundance_Glomeraceae_map
+  bind_cols(EpredY_map) %>%
+  mutate(pixel_ID = as.factor(1:n())) %>%
+  pivot_longer(-c(pixel_ID,x, y, ndvi, precip, tmax, tdelta, wind), values_to = "abundance", names_to = "genus") %>%
+  left_join(taxomony_AMF_genuslevel, by = "genus") -> EpredY_abundance_df
 ```
 
-```{r}
-data_spatial_df %>%
-    bind_cols(EpredY_map) %>%
-    pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
-    filter(name == "Acaulospora (88 OTU)") %>%
-    mutate(value = value) %>%
+
+```{r, purl = FALSE}
+EpredY_abundance_df %>%
     ggplot() +
-    facet_wrap(~name) +
-    geom_raster(aes(x, y, fill = value)) +
+    facet_wrap(~genus) +
+    geom_raster(aes(x, y, fill = abundance)) +
+    scale_fill_viridis(option = "magma") +
+    labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
+    main_theme_final
+```
+Some genus are over predicted by the model in some condition making the abundance scale way to high to see something
+
+## Glomeraceae prediction
+
+```{r, purl = FALSE}
+EpredY_abundance_df %>%
+  filter(family == "f__Glomeraceae") %>%
+    ggplot() +
+    facet_wrap(~genus) +
+    geom_raster(aes(x, y, fill = abundance)) +
+    scale_fill_viridis(option = "magma") +
+    labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
+    main_theme_final
+```
+
+## Gigasporaceae prediction
+
+```{r, purl = FALSE}
+EpredY_abundance_df %>%
+  filter(family == "f__Gigasporaceae") %>%
+    ggplot() +
+    facet_wrap(~genus) +
+    geom_raster(aes(x, y, fill = abundance)) +
+    scale_fill_viridis(option = "magma") +
+    labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
+    main_theme_final
+```
+## Acaulosporaceae prediction
+
+```{r, purl = FALSE}
+EpredY_abundance_df %>%
+  filter(family == "f__Acaulosporaceae") %>%
+    ggplot() +
+    facet_wrap(~genus) +
+    geom_raster(aes(x, y, fill = abundance)) +
     scale_fill_viridis(option = "magma") +
     labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
     main_theme_final -> abundance_Acaulosporaceae_map
 
 ggsave(plot = abundance_Acaulosporaceae_map, filename = "figures/genus/abundance_Acaulosporaceae_map.pdf", units = "cm", width = 18 ,height = 18 )
-abundance_Acaulosporaceae_map
 ```
+## Diversisporaceae prediction
 
 ```{r, purl = FALSE}
-data_spatial_df %>%
-    bind_cols(EpredY_map) %>%
-    pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
-    filter(name %in% c("Entrophosporaceae (40 OTU)", "Gigasporaceae (14 OTU)", "Pervetustaceae (2 OTU)", "Diversisporaceae (36 OTU)", "Unknown Gigasporales (6 OTU)")) %>%
-    mutate(value = value) %>%
+EpredY_abundance_df %>%
+  filter(family == "f__Diversisporaceae") %>%
     ggplot() +
-    facet_wrap(~name) +
-    geom_raster(aes(x, y, fill = value)) +
+    facet_wrap(~genus) +
+    geom_raster(aes(x, y, fill = abundance)) +
     scale_fill_viridis(option = "magma") +
     labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
-    main_theme_final -> medium_abundante_genus_map
-
-ggsave(plot = medium_abundante_genus_map, filename = "figures/genus/medium_abundante_genus_map.pdf", units = "cm", width = 33 ,height = 20)
-medium_abundante_genus_map
+    main_theme_final
 ```
-```{r, purl = FALSE}
-data_spatial_df %>%
-    bind_cols(EpredY_map) %>%
-    pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
-    filter(name %in% c("Scutellosporaceae (2 OTU)", "Racocetraceae (7 OTU)", "Dentiscutataceae (12 OTU)", "Paraglomeraceae (7 OTU)")) %>%
-    mutate(value = value) %>%
-    ggplot() +
-    facet_wrap(~name) +
-    geom_raster(aes(x, y, fill = value)) +
-    scale_fill_viridis(option = "magma") +
-    labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
-    main_theme_final -> low_abundante_genus_map
-
-ggsave(plot = low_abundante_genus_map, filename = "figures/genus/low_abundante_genus_map.pdf", units = "cm", width = 33 ,height = 20)
-low_abundante_genus_map
-```
-
-```{r, purl = FALSE}
-
-data_spatial_df %>%
-    bind_cols(EpredY_map) %>%
-    pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
-    filter(!(name %in% c("Unknown Archaeosporomycetes (4 OTU)",
-                       "Unknown cl01 (27 OTU)",
-                       "Unknown Glomeromycota (6 OTU)",
-                       "Glomeraceae (452 OTU)"))) %>%
-    mutate(value = value) %>%
-    ggplot() +
-    facet_wrap(~name) +
-    geom_raster(aes(x, y, fill = value)) +
-    scale_fill_viridis(option = "magma") +
-    labs(x = "Lon", y = "Lat", fill = "Abundance (log10)") +
-    theme_classic() +
-    theme(
-      aspect.ratio = 1,
-      plot.margin = margin(0, 0, 0, 0),
-      axis.title.x = element_blank(),
-      panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
-      axis.title.y = element_text(colour = "black", size = 14, face = "italic")
-    )
-data_spatial_df %>%
-    bind_cols(EpredY_map) %>%
-    pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
-    filter(!(name %in% c("Unknown Archaeosporomycetes (4 OTU)",
-                       "Unknown cl01 (27 OTU)",
-                       "Unknown Glomeromycota (6 OTU)",
-                       "Glomeraceae (452 OTU)"))) %>%
-    mutate(value = value) %>%
-    ggplot() +
-    facet_wrap(~name) +
-    geom_raster(aes(x, y, fill = value)) +
-    scale_fill_viridis(option = "magma") +
-    labs(x = "Lon", y = "Lat", fill = "Abundance (log10)") +
-    theme_classic() +
-    theme(
-      aspect.ratio = 1,
-      plot.margin = margin(0, 0, 0, 0),
-      axis.title.x = element_blank(),
-      panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
-      axis.title.y = element_text(colour = "black", size = 14, face = "italic")
-    )
-data_spatial_df %>%
-    bind_cols(EpredY_map) %>%
-    pivot_longer(-c(x, y, ndvi, precip, tmax, tdelta, wind)) %>%
-    filter(!(name %in% c("Unknown Archaeosporomycetes (4 OTU)",
-                       "Unknown cl01 (27 OTU)",
-                       "Unknown Glomeromycota (6 OTU)",
-                       "Glomeraceae (452 OTU)"))) %>%
-    mutate(value = value ) %>%
-    ggplot() +
-    facet_wrap(~name) +
-    geom_raster(aes(x, y, fill = value)) +
-    scale_fill_viridis(option = "magma") +
-    labs(x = "Lon", y = "Lat", fill = "Abundance (log10)") +
-    theme_classic() +
-    theme(
-      aspect.ratio = 1,
-      plot.margin = margin(0, 0, 0, 0),
-      axis.title.x = element_blank(),
-      panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
-      axis.title.y = element_text(colour = "black", size = 14, face = "italic")
-    )
-
-```
-
-
