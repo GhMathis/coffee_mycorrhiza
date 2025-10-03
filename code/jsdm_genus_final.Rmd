@@ -17,6 +17,7 @@ library(ape)
 library(ggtree)
 library(nlme)
 library(ggspatial)
+library(patchwork)
 
 main_theme = theme_minimal() +
  theme(aspect.ratio = 1,
@@ -371,8 +372,11 @@ ROC_df %>%
   group_by(pred_name) %>%
   filter(F1_score == max(F1_score, na.rm = TRUE)) %>%
   dplyr::select(pred_name, threshold, F1_score) %>%
-  distinct() %>%
-  mutate(threshold = case_when(pred_name %in% c("Unknown Glomeraceae (120 OTU)", "Acaulospora (88 OTU)") ~ 1.1,
+  distinct() %>% 
+  mutate(threshold = case_when(pred_name %in% c("Unknown Glomeraceae (120 OTU)", 
+                                                "Acaulospora (88 OTU)", 
+                                                "Nanoglomus (128 OTU)",
+                                                "Sclerocystis (52 OTU)") ~ 1.1,
                    .default = threshold)) -> max_f1_score_df
 ROC_df %>%
   mutate(balanced_score = TPR-FPR) %>%
@@ -381,7 +385,10 @@ ROC_df %>%
   dplyr::select(pred_name, threshold, balanced_score, TPR, FPR) %>%
   rename(TPR_b = "TPR", FPR_b = "FPR") %>%
   distinct() %>%
-  rbind(.,data.frame(pred_name =  c("Unknown Glomeraceae (120 OTU)", "Acaulospora (88 OTU)"), threshold = 1.1, balanced_score =NA)) -> balanced_score_df
+  rbind(.,data.frame(pred_name =  c("Unknown Glomeraceae (120 OTU)", 
+                                                "Acaulospora (88 OTU)", 
+                                                "Nanoglomus (128 OTU)",
+                                                "Sclerocystis (52 OTU)"), threshold = 1.1, balanced_score =NA)) -> balanced_score_df
 
 
 ROC_df %>%
@@ -409,7 +416,10 @@ ROC_df %>%
               dplyr::select(!F1_score) %>%
               rename(threshold_F1 = "threshold"), by ="pred_name") %>%
   arrange(threshold) %>%
-  filter(!pred_name %in% c("Glomeraceae (452 OTU)", "Acaulosporaceae (88 OTU)")) %>%
+  filter(!pred_name %in% c("Unknown Glomeraceae (120 OTU)", 
+                                                "Acaulospora (88 OTU)", 
+                                                "Nanoglomus (128 OTU)",
+                                                "Sclerocystis (52 OTU)")) %>%
   ggplot() +
   facet_wrap(~pred_name) +
   geom_path(aes(x=FPR,y=TPR), size=1) +
@@ -820,8 +830,7 @@ if(file.exists("outputs/models/occurence_prediction_map_genus.RData")){
 
 ```{r}
 recap_pred_bin_df %>%
-  filter(mod_ID == "mod_full", AUC >0.75| is.na(AUC)) %>% #, genus_names!="Diversisporaceae (36 OTU)"
-  pull(genus_names) -> good_occurence_prediction
+  filter(mod_ID == "mod_full", AUC >0.75| is.na(AUC)) 
 ```
 
 ```{r, purl = FALSE}
@@ -862,21 +871,6 @@ EpredY_occurance_df %>%
       axis.title.y = element_text(colour = "black", size = 14, face = "italic")
     ) -> map_occurence_allgenus
 
-EpredY_occurance_df %>%
-  ggplot() +
-    facet_wrap(~name) +
-    geom_raster(aes(x, y, fill = value)) +
-    scale_fill_viridis(discrete = T, option = "viridis", begin = 0.05, end = 0.6) +
-     labs(x = "Longitude", y = "Latitude", fill = "Occurence") + 
-    theme_classic() +
-    theme(
-      aspect.ratio = 1,
-      plot.margin = margin(0, 0, 0, 0),
-      axis.title.x = element_blank(),
-      panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
-      axis.title.y = element_text(colour = "black", size = 14, face = "italic")
-    ) -> map_occurence_best_predicted_genus
-
 
 EpredY_occurance_df %>%
   filter(!str_detect(genus, "Unknown")) %>%
@@ -900,16 +894,16 @@ EpredY_occurance_df %>%
           text_size  = 10
         )) +
       scale_fill_viridis(option = "magma") +
-      labs(x = "Longitude", y = "Latitude", fill = "Knonwn genus richness") +
+      labs(x = "Longitude", y = "Latitude", fill = "Known genus richness") +
       main_theme_final -> map_richness
 
-map_occurence_allgenus
-map_occurence_best_predicted_genus
-map_richness
+
 
 ggsave(plot = map_occurence_allgenus, filename = "figures/genus/map_occurence_allgenus.pdf", units = "cm", width = 33 ,height = 20)
-ggsave(plot = map_occurence_best_predicted_genus, filename = "figures/genus/map_occurence_best_predicted_genus.pdf", units = "cm", width = 33 ,height = 20 )
-ggsave(plot = map_richness, filename = "figures/genus/map_richness.pdf", units = "cm", width = 18 ,height = 18)
+ggsave(plot = map_richness, filename = "figures/genus/map_richness.pdf", units = "cm", width = 12 ,height = 12)
+
+map_occurence_allgenus
+map_richness
 ```
 
 # Abundance
@@ -1000,17 +994,36 @@ EpredY_abundance_df %>%
 ```
 Some genus are over predicted by the model in some condition making the abundance scale way to high to see something
 
+
+
 ## Glomeraceae prediction
 
 ```{r, purl = FALSE}
 EpredY_abundance_df %>%
+  filter(family == "f__Glomeraceae") %>% 
+  group_by(genus) %>%
+  summarise(mean_abund = max(abundance)) %>%
+  arrange(desc(mean_abund)) %>%
+  pull(genus) -> odred_Glomeraceae
+
+EpredY_abundancesplit_Glomera <- EpredY_abundance_df %>%
   filter(family == "f__Glomeraceae") %>%
-    ggplot() +
+  mutate(genus = factor(genus, levels = odred_Glomeraceae)) %>%
+  group_split(genus)
+EpredY_abundancesplit_Glomera %>%
+  purrr::map(~{
+  ggplot() +
     facet_wrap(~genus) +
-    geom_raster(aes(x, y, fill = abundance)) +
-    scale_fill_viridis(option = "magma") +
+    geom_raster(data = .x, aes(x, y, fill = abundance)) +
+    ## you need to pass the unique group and color identifier to your scale
+    scale_fill_viridis(option = "magma")+
     labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
     main_theme_final
+}) %>%
+  ## wrap the plots 
+  patchwork::wrap_plots()  -> abundance_Glomeraceae_map
+
+ggsave(plot = abundance_Glomeraceae_map, filename = "figures/genus/abundance_Glomeraceae_map.pdf", units = "cm", width = 48 ,height = 48)
 ```
 
 ## Gigasporaceae prediction
@@ -1023,7 +1036,9 @@ EpredY_abundance_df %>%
     geom_raster(aes(x, y, fill = abundance)) +
     scale_fill_viridis(option = "magma") +
     labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
-    main_theme_final
+    main_theme_final -> abundance_Gigasporaceae_map
+
+ggsave(plot = abundance_Gigasporaceae_map, filename = "figures/genus/abundance_Gigasporaceae_map.pdf", units = "cm", width = 12 ,height = 12 )
 ```
 ## Acaulosporaceae prediction
 
@@ -1037,17 +1052,37 @@ EpredY_abundance_df %>%
     labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
     main_theme_final -> abundance_Acaulosporaceae_map
 
-ggsave(plot = abundance_Acaulosporaceae_map, filename = "figures/genus/abundance_Acaulosporaceae_map.pdf", units = "cm", width = 18 ,height = 18 )
+abundance_Acaulosporaceae_map
+
+ggsave(plot = abundance_Acaulosporaceae_map, filename = "figures/genus/abundance_Acaulosporaceae_map.pdf", units = "cm", width = 12 ,height = 12 )
 ```
 ## Diversisporaceae prediction
 
 ```{r, purl = FALSE}
 EpredY_abundance_df %>%
+  filter(family == "f__Diversisporaceae") %>% 
+  group_by(genus) %>%
+  summarise(mean_abund = max(abundance)) %>%
+  arrange(desc(mean_abund)) %>%
+  pull(genus) -> odred_Diversisporaceae
+
+EpredY_abundancesplit_divers <- EpredY_abundance_df %>%
   filter(family == "f__Diversisporaceae") %>%
-    ggplot() +
+  mutate(genus = factor(genus, levels = odred_Diversisporaceae)) %>%
+  group_split(genus)
+EpredY_abundancesplit_divers %>%
+  purrr::map(~{
+  ggplot() +
     facet_wrap(~genus) +
-    geom_raster(aes(x, y, fill = abundance)) +
-    scale_fill_viridis(option = "magma") +
+    geom_raster(data = .x, aes(x, y, fill = abundance)) +
+    ## you need to pass the unique group and color identifier to your scale
+    scale_fill_viridis(option = "magma")+
     labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
     main_theme_final
+}) %>%
+  ## wrap the plots 
+  wrap_plots(nrow= 3)  -> abundance_Diversisporaceae_map
+
+ggsave(plot = abundance_Diversisporaceae_map, filename = "figures/genus/abundance_Diversisporaceae_map.pdf", units = "cm", width = 12 ,height = 36 )
+
 ```
