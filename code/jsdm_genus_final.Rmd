@@ -385,10 +385,11 @@ ROC_df %>%
   dplyr::select(pred_name, threshold, balanced_score, TPR, FPR) %>%
   rename(TPR_b = "TPR", FPR_b = "FPR") %>%
   distinct() %>%
-  rbind(.,data.frame(pred_name =  c("Unknown Glomeraceae (120 OTU)", 
-                                                "Acaulospora (88 OTU)", 
-                                                "Nanoglomus (128 OTU)",
-                                                "Sclerocystis (52 OTU)"), threshold = 1.1, balanced_score =NA)) -> balanced_score_df
+  rbind(.,data.frame(pred_name =  c("Acaulospora (88 OTU)", 
+                                                "Unknown Glomeraceae (120 OTU)"), threshold = 1.1, balanced_score =NA)) %>%
+  mutate(threshold = case_when(pred_name %in% c("Nanoglomus (128 OTU)",
+                                              "Sclerocystis (52 OTU)") ~ 1.1,
+                 .default = threshold)) -> balanced_score_df
 
 
 ROC_df %>%
@@ -478,8 +479,9 @@ Estimated response of each genus to environmental variable with phylogenetic tre
 Response of abundance :
 
 ```{r echo=FALSE, purl = FALSE}
-p <- ggtree(genus_tree, layout = "roundrect") +
-  geom_tiplab(align = TRUE, size  = 3) +
+
+p <- ggtree::ggtree(tr = genus_tree, layout = "roundrect") +
+  geom_tiplab(align = TRUE, size = 3) +
   theme_tree() 
 
 colnames(beta_results) = c("Intercept", "NDVI", "Precipitation",
@@ -498,11 +500,13 @@ ggsave(plot = effect_plot_genus_abund, filename = "figures/genus/effect_plot_gen
         height = 18, width = 20)
 
 effect_plot_genus_abund
+as.Date
 ```
 
 ```{r echo=FALSE, purl = FALSE}
+
 p <- ggtree(genus_tree, layout = "roundrect") +
-  geom_tiplab(align = TRUE, size  = 3) +
+  geom_tiplab(align = TRUE, size = 3) +
   theme_tree()
 
 colnames(beta_results_bin) = c("Intercept", "Biomass quantity index", "Precipitation", "T° max", "T° delta", "Wind")
@@ -809,12 +813,11 @@ XData.grid <- data_spatial_df %>%
 if(file.exists("outputs/models/occurence_prediction_map_genus.RData")){
   load("outputs/models/occurence_prediction_map_genus.RData")
 }else{
-  Gradient <-  prepareGradient(list_mods_bin_crossvalidation[[6]]$hmsc_mod, XDataNew = XData.grid, sDataNew = list(route = xy.grid))
+  Gradient <-  prepareGradient(m_converg_selected_bin, XDataNew = XData.grid, sDataNew = list(route = xy.grid))
   predY_bin <- stats::predict(m_converg_selected_bin, Gradient = Gradient)
   
   EpredY_bin_map <- predY_bin[[1]]
-  
-  str(predY_bin)
+  colnames(EpredY_bin_map)
   # Average over predictions
   if (length(predY_bin) > 1) {
     for (i in 2:length(predY_bin)) {
@@ -825,7 +828,7 @@ if(file.exists("outputs/models/occurence_prediction_map_genus.RData")){
   }
   save(EpredY_bin_map, file = "outputs/models/occurence_prediction_map_genus.RData")
 }
-
+ncol(EpredY_bin_map)
 ```
 
 ```{r}
@@ -834,8 +837,9 @@ recap_pred_bin_df %>%
 ```
 
 ```{r, purl = FALSE}
-balanced_score_df
-balanced_score_df$pred_name == colnames(EpredY_bin_map)
+
+all(balanced_score_df$pred_name == colnames(EpredY_bin_map))
+
 EpredY_bin_map <- EpredY_bin_map[,balanced_score_df$pred_name]
 balanced_score_df$pred_name == colnames(EpredY_bin_map)
 EpredY_occurance_map <- sweep(EpredY_bin_map, 2,
@@ -846,6 +850,7 @@ EpredY_occurance_map <- +EpredY_occurance_map
 
 
 ```{r, purl = FALSE}
+colnames(EpredY_occurance_map)
 data_spatial_df %>%
   bind_cols(EpredY_occurance_map) %>%
   mutate(pixel_ID = as.factor(1:n())) %>%
@@ -899,7 +904,7 @@ EpredY_occurance_df %>%
 
 
 
-ggsave(plot = map_occurence_allgenus, filename = "figures/genus/map_occurence_allgenus.pdf", units = "cm", width = 33 ,height = 20)
+ggsave(plot = map_occurence_allgenus, filename = "figures/genus/map_occurence_allgenus.pdf", units = "cm",width = 48 ,height = 48)
 ggsave(plot = map_richness, filename = "figures/genus/map_richness.pdf", units = "cm", width = 12 ,height = 12)
 
 map_occurence_allgenus
@@ -944,7 +949,7 @@ if(file.exists("outputs/models/abundance_prediction_map_genus.RData")){
 }else{
   Gradient <-  prepareGradient(list_mods_crossvalidation[[6]]$hmsc_mod, XDataNew = XData.grid, sDataNew = list(route = xy.grid))
   predY <- stats::predict(m_converg_selected, Gradient = Gradient)
-  
+
   EpredY_map <- predY[[1]]
   
   

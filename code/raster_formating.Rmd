@@ -223,7 +223,6 @@ if(file.exists("outputs/raster/wind_2023.tif")){
   }
 
 plot(wind_2023_final)
-
 ```
 
 

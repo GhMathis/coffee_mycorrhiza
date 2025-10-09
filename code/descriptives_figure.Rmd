@@ -54,7 +54,7 @@ main_theme_final = theme_bw() +
 ```{r echo=FALSE}
 metadata <- read_xlsx(path = "data/Metadata_Doreen_070525.xlsx")
 soil_metadata <- read_xlsx(path = "data/soil_data_dry_season_2023.xlsx") %>% 
-  select(-c(Zone, Cluster, Replicate,`Robusta coffee system`)) %>%
+  dplyr::select(-c(Zone, Cluster, Replicate,`Robusta coffee system`)) %>%
   rename(Sample_code = "SAMPLE NO",
           clay = "Clay%",
           N = "N%",
@@ -118,7 +118,9 @@ ug_border <- read_sf("data/ug_shp/ug.shp")
 ggplot(ug_border) +
   geom_sf() +
   geom_point(data =wgs84_coords, aes(x = lon,y = lat )) +
-  main_theme_final
+  main_theme_final -> ug_sampling_map
+
+ggsave(plot = ug_sampling_map, filename = "figures/genus/ug_sampling_map.pdf", units = "cm", width = 12 ,height = 12)
 ```
 
 ```{r}
@@ -213,6 +215,8 @@ Y_genus %>%
 
 
 ```{r}
+library(pals)
+
 Y_genus %>% 
   as.data.frame() %>%
   rownames_to_column("Sample_code") %>%
@@ -232,10 +236,10 @@ p_tree_genus +
   geom_facet(panel = "Sum reads rarefied (log)", data = sum_reads_genus_df, geom = geom_col, 
                 aes(x = sum_rarefied_reads_log,
                 fill = family), orientation = 'y', width = .6) +
-  scale_fill_viridis(discrete = T)+
+  scale_fill_manual(values = watlington()[c(3:7,9:13,8)]) +
   main_theme_final -> tree_sum_read_plot
 tree_sum_read_plot
-ggsave(plot = tree_sum_read_plot, filename = "figures/tree_sum_read_plot.pdf", units = "cm",height = 11, width = 21)
+ggsave(plot = tree_sum_read_plot, filename = "figures/genus/tree_sum_read_plot.pdf", units = "cm",height = 15, width = 28)
 ```
 
 

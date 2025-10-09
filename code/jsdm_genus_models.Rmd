@@ -173,7 +173,7 @@ compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 10,   test.run = T){
   } else {
     #with this option, the vignette evaluates slow but it reproduces the results of the
     #.pdf version
-    thin = 10
+    thin = 5
     samples = 2000
     transient = 1000*thin
     verbose = 1000*thin
