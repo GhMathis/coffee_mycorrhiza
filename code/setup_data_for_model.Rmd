@@ -108,13 +108,23 @@ leaflet() %>%
                   lat = ~lat, radius = 8, color = "blue", fillOpacity = 0.8)
 ```
 
+```{r}
+raster.standa <- function(r){
+  r_mean <- cellStats(r, "mean")
+  r_sd   <- cellStats(r, "sd")
+  r_z <- (r - r_mean) / r_sd
+  return(r_z)
+  }
+```
+
 ## NDVI
 
 Indice for vegetation quantity
 https://planetarycomputer.microsoft.com/dataset/sentinel-3-synergy-v10-l2-netcdf
 
 ```{r echo=FALSE}
-ndvi_uganda <- raster("outputs/raster/ndvi_uganda_lower_res.tif")
+ndvi_uganda <- raster("outputs/raster/ndvi_uganda_lower_res.tif") %>%
+  raster.standa
 
 ndvi_df <- raster::extract(ndvi_uganda, wgs84_coords)%>%
  tibble(ndvi = .,
@@ -136,7 +146,8 @@ leaflet() %>%
 This is still work in progess, here the precipitation are for only **May 2023**. It is hard to get the data but I will try to obtain mean or sum precipitation for a hole year before June 2023.
 
 ```{r echo=FALSE}
-precip_uganda_resampled <- raster("outputs/raster/precip_2023_lower_res.tif")
+precip_uganda_resampled <- raster("outputs/raster/precip_2023_lower_res.tif") %>%
+  raster.standa
 
 precip_df <- raster::extract(precip_uganda_resampled, wgs84_coords)%>%
  tibble(precip = .,
@@ -154,7 +165,8 @@ leaflet() %>%
 ```
 
 ```{r echo=FALSE}
-tmax_uganda_resampled <- raster("outputs/raster/tmax_2023_lower_res.tif")
+tmax_uganda_resampled <- raster("outputs/raster/tmax_2023_lower_res.tif") %>%
+  raster.standa
 
 tmax_df <- raster::extract(tmax_uganda_resampled, wgs84_coords)%>%
  tibble(tmax = .,
@@ -172,7 +184,8 @@ leaflet() %>%
 ```
 
 ```{r echo=FALSE}
-tmin_uganda_resampled <- raster("outputs/raster/tmin_2023_lower_res.tif")
+tmin_uganda_resampled <- raster("outputs/raster/tmin_2023_lower_res.tif") %>%
+  raster.standa
 
 tmin_df <- raster::extract(tmin_uganda_resampled, wgs84_coords)%>%
  tibble(tmin = .,
@@ -189,8 +202,10 @@ leaflet() %>%
 ```
 
 ```{r}
-delta_t_uganda <- tmax_uganda_resampled -tmin_uganda_resampled
-
+delta_t_uganda <- raster("outputs/raster/tmax_2023_lower_res.tif") - raster("outputs/raster/tmin_2023_lower_res.tif")
+delta_t_uganda <- delta_t_uganda %>%
+  raster.standa
+  
 tdelta_df <- raster::extract(delta_t_uganda, wgs84_coords)%>%
  tibble(tdelta = .,
     Sample_code  = wgs84_coords$Sample_code)
@@ -206,7 +221,9 @@ leaflet() %>%
 ```
 
 ```{r echo=FALSE}
-wind_2023 <- raster("outputs/raster/wind_2023.tif")
+wind_2023 <- raster("outputs/raster/wind_2023.tif") %>%
+  raster.standa
+
 pal_wind <- colorNumeric("Spectral", domain = c(0, 4))
 wind_df <- raster::extract(wind_2023, wgs84_coords)%>%
  tibble(wind = .,
@@ -283,7 +300,7 @@ covariate_df <- wgs84_coords %>%
 
 covariate_df %>%
   column_to_rownames("Sample_code") %>%
-  mutate(across(where(is.numeric), ~vegan::decostand(.x, method = "standardize")[,1])) %>%
+  #mutate(across(where(is.numeric), ~vegan::decostand(.x, method = "standardize")[,1])) %>%
   rownames_to_column("Sample_code") %>%
   mutate(Sample_code = as.factor(Sample_code)) -> covariate_standa_df
 ```
