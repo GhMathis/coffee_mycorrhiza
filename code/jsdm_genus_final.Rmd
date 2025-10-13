@@ -263,7 +263,7 @@ ggsave(plot = vaildation_mod_abund_genus_full, filename = "figures/genus/vaildat
 ## Occurence models
 
 ```{r}
-load(file = "outputs/models/list_mods_bin_crossvalidation_genus2.RData")
+load(file = "outputs/models/list_mods_bin_crossvalidation_genus.RData")
 ```
 
 ```{r, purl = FALSE}
@@ -456,6 +456,8 @@ beta_results <- postBeta2$mean
 rownames(beta_results) <- colnames(m_converg_selected$X)
 beta_results[!(postBeta2$support > 0.9 | postBeta2$support < 0.1)] <- NA
 beta_results <- t(beta_results)[genus_tree$tip.label, colnames(m_converg_selected$X)]
+
+plotBeta(m_converg_selected, post = postBeta2, param = "Support")
 ```
 
 ```{r include=FALSE, purl = FALSE}
@@ -474,12 +476,19 @@ beta_results_bin <- t(beta_results_bin)[genus_tree$tip.label, colnames(m_converg
 ```
 ### genus response to each varaibles
 
+```{r}
+# Needed to create a custom function of ggheatmap to implement a bug correction that wasn't already release, see https://github.com/YuLab-SMU/ggtree/pull/668 for the bug correction author (just copy pasted the corrected function to a local file -> ggheatmap.custom.R)
+# install.packages("magrittr")
+library(magrittr)
+source("code/ggheatmap.custom.R")
+```
+
 Estimated response of each genus to environmental variable with phylogenetic tree. 
 
 Response of abundance :
 
-```{r echo=FALSE, purl = FALSE}
 
+```{r echo=FALSE, purl = FALSE}
 p <- ggtree::ggtree(tr = genus_tree, layout = "roundrect") +
   geom_tiplab(align = TRUE, size = 3) +
   theme_tree() 
@@ -487,7 +496,13 @@ p <- ggtree::ggtree(tr = genus_tree, layout = "roundrect") +
 colnames(beta_results) = c("Intercept", "NDVI", "Precipitation",
                            "T° max", "T° delta", "Wind")
 
-gheatmap(p, beta_results, offset = 1, width = 1, font.size = 5,
+ beta_results %>%
+   as.data.frame() %>%
+   rownames_to_column("label") %>%
+  pivot_longer(-label, names_to = "variable", values_to = "value") -> beta_results_long
+ 
+
+ggheatmap.custom(p = p, data = beta_results, offset = 1, width = 1, font.size = 5,
          colnames_angle = -60, hjust = 0) +
   scale_fill_gradient2(low = "#0039A6", mid = "white", high = "#CC0000", na.value = "grey90",
                        limits = c(min(beta_results), max(beta_results))) +
@@ -500,7 +515,6 @@ ggsave(plot = effect_plot_genus_abund, filename = "figures/genus/effect_plot_gen
         height = 18, width = 20)
 
 effect_plot_genus_abund
-as.Date
 ```
 
 ```{r echo=FALSE, purl = FALSE}
@@ -511,7 +525,7 @@ p <- ggtree(genus_tree, layout = "roundrect") +
 
 colnames(beta_results_bin) = c("Intercept", "Biomass quantity index", "Precipitation", "T° max", "T° delta", "Wind")
 
-gheatmap(p, beta_results_bin, offset = 1, width = 1, font.size = 5,
+ggheatmap.custom(p, beta_results_bin, offset = 1, width = 1, font.size = 5,
          colnames_angle = -60, hjust = 0) +
   scale_fill_gradient2(low = "#0039A6", mid = "white", high = "#CC0000", na.value = "grey90",
                        limits = c(min(beta_results), max(beta_results))) +
@@ -898,7 +912,7 @@ EpredY_occurance_df %>%
           line_width = 2,
           text_size  = 10
         )) +
-      scale_fill_viridis(option = "magma") +
+      scale_fill_viridis(option = "magma", limits = c(0, 26)) +
       labs(x = "Longitude", y = "Latitude", fill = "Known genus richness") +
       main_theme_final -> map_richness
 
@@ -1029,6 +1043,8 @@ EpredY_abundancesplit_Glomera %>%
   patchwork::wrap_plots()  -> abundance_Glomeraceae_map
 
 ggsave(plot = abundance_Glomeraceae_map, filename = "figures/genus/abundance_Glomeraceae_map.pdf", units = "cm", width = 48 ,height = 48)
+
+abundance_Glomeraceae_map
 ```
 
 ## Gigasporaceae prediction
@@ -1044,6 +1060,7 @@ EpredY_abundance_df %>%
     main_theme_final -> abundance_Gigasporaceae_map
 
 ggsave(plot = abundance_Gigasporaceae_map, filename = "figures/genus/abundance_Gigasporaceae_map.pdf", units = "cm", width = 12 ,height = 12 )
+abundance_Gigasporaceae_map
 ```
 ## Acaulosporaceae prediction
 
@@ -1089,5 +1106,5 @@ EpredY_abundancesplit_divers %>%
   wrap_plots(nrow= 3)  -> abundance_Diversisporaceae_map
 
 ggsave(plot = abundance_Diversisporaceae_map, filename = "figures/genus/abundance_Diversisporaceae_map.pdf", units = "cm", width = 12 ,height = 36 )
-
+abundance_Diversisporaceae_map
 ```
