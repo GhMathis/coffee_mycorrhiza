@@ -5,8 +5,8 @@ library(ape)
 
 
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-test_run = T
-# test_run = F
+test_run = T # For test, take few minutes
+# test_run = F # True run, need 2 day to compute on 10 physical core with a frequency of approximately 4.6 GHz 
 if(test_run){
   nfolds = 2
   nChains = 2
@@ -189,6 +189,7 @@ compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 10,   test.run = T){
   purrr::map(\(x) compute.hmsc(model_list[[x]], nfold = nfolds, nChains = nChains,   test.run = test_run)) -> list_mods_crossvalidation
 
 if(file.exists("outputs/models/list_mods_crossvalidation_genus_pois_log.RData")){
+  # safe save in case a model list in already present in the folder
   save(list_mods_crossvalidation, file = "outputs/models/list_mods_crossvalidation_genus_pois_log_safesave.RData")
   }else{
   save(list_mods_crossvalidation, file = "outputs/models/list_mods_crossvalidation_genus_pois_log.RData")
@@ -307,6 +308,7 @@ model_bin_list <- list(
   purrr::map(\(x) compute.hmsc(model_bin_list[[x]], nfold = nfolds, nChains = nChains,   test.run = test_run)) -> list_mods_bin_crossvalidation
 
 if(file.exists("outputs/models/list_mods_bin_crossvalidation_genus.RData")){
+  # safe save in case a model list in already present in the folder
   save(list_mods_bin_crossvalidation, file = "outputs/models/list_mods_bin_crossvalidation_genus_safesave.RData")
   }else{
   save(list_mods_bin_crossvalidation, file = "outputs/models/list_mods_bin_crossvalidation_genus.RData")
