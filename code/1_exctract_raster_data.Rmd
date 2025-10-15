@@ -12,8 +12,10 @@ library(stars)
 ```
 
 # NDVI raster
-## Prepartation before loading raster
+## Preparation before loading raster
+
 A STAC URl where data catalog is located
+
 ```{r}
 s_obj <- stac("https://planetarycomputer.microsoft.com/api/stac/v1/")
 
@@ -39,6 +41,7 @@ it_obj <- s_obj %>%
 ```
 
 ## Load raster in a temporary file
+
 ```{r}
 signed_items <- it_obj %>% items_sign(sign_planetary_computer())
 tmp_file_list = c()
@@ -48,7 +51,7 @@ for(n in 1:length(signed_items$features)){
   download.file(ndvi_url, destfile = tmp_file_list[n], mode = "wb")
 }
 
-rasters <- stack(tmp_file_list)
+rasters <- raster::stack(tmp_file_list)
 ndvi_mean <- calc(rasters, mean, na.rm = TRUE)
 plot(ndvi_mean)
 ```
@@ -63,7 +66,6 @@ uganda_bbox_sf <- sf::st_as_sfc(sf::st_bbox(c(
 ), crs = st_crs(ndvi_mean)))
 
 # Crop the raster
-raster::crop()
 ndvi_mean_uganda <- ndvi_mean %>%
   crop(extent(29.5, 35.0, -1.5, 4.5)) %>%
   as( "Raster")
