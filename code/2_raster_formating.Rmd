@@ -18,7 +18,8 @@ library(raster)
 # Load raster
 
 ## Land dégradation
-Use to crop Ugada border, not présent in the models
+
+Use to crop Uganda border, not included in the models
 
 ```{r}
 land_degradation_raster <- raster("data/raster/Uganda_ldma_2020.tif/Uganda_ldma_2020.tif")
@@ -143,8 +144,6 @@ if(file.exists("outputs/raster/land_degradation_lower_res.tif")){
   land_degradation_lower_res <- raster::aggregate(land_degradation_raster, fact=50, fun = modal,  na.rm=TRUE)
   land_degradation_lower_res <- ratify(land_degradation_lower_res)
   levels(land_degradation_lower_res)[[1]]$land_degradation <- c("Very low", "Low", "Medium", "High", "Very High")
- 
-  rasterVis::levelplot(test,par.settings = myTheme1)
   writeRaster(land_degradation_lower_res,
             filename = "outputs/raster/land_degradation_lower_res.tif",options=c('TFW=YES'), overwrite=TRUE)
   foreign::write.dbf(levels(land_degradation_lower_res)[[1]], file = "outputs/raster/land_degradation_lower_res.tif.vat.dbf")
