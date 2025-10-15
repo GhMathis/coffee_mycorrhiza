@@ -15,54 +15,13 @@ library(readxl)
 library(sf)
 library(pals)
 library(viridis)
-
-
-main_theme = theme_minimal() +
- theme(aspect.ratio = 1,
-        axis.text.x = element_text(colour = "black", size=13, face="italic",angle =45, vjust =1, hjust =1),
-        axis.text.y = element_text(colour = "black", size=13, face="italic"),
-        axis.title = element_text(colour = "black", size=12),
-        panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
-        legend.title = element_text(colour = "black", size=12,
-                                    hjust =0.5),
-
-        legend.text = element_text(colour = "black", size=13))
-
-main_theme_final = theme_bw() +
- theme(aspect.ratio = 1,
-        axis.text.x = element_text(colour = "black", size=7, face="italic", vjust =1, hjust =1),
-        axis.text.y = element_text(colour = "black", size=7, face="italic"),
-        axis.title = element_text(colour = "black", size=9),
-        panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8),
-        #panel.background = element_blank(),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        legend.title = element_text(colour = "black", size=9,
-                                    hjust =0.5),
-        legend.key.size = unit(0.3, 'cm'),
-        legend.text = element_text(colour = "black", size=7,face="italic"),
-        strip.background = element_blank(),
-        strip.text = element_text(margin = margin(0.05,0,0.05,0, "cm"),size = 7),
-        title = element_text(colour = "black", size=9))
 ```
-# Spatial covariate
 
+# Spatial covariate
 ## Sampling points
+
 ```{r echo=FALSE}
 metadata <- read_xlsx(path = "data/Metadata_Doreen_070525.xlsx")
-# soil_metadata <- read_xlsx(path = "data/soil_data_dry_season_2023.xlsx") %>% 
-#   dplyr::select(-c(Zone, Cluster, Replicate,`Robusta coffee system`)) %>%
-#   rename(Sample_code = "SAMPLE NO",
-#           clay = "Clay%",
-#           N = "N%",
-#           OC = "OC%",
-#           pH = "soil pH",
-#           sand= "Sand%",
-#           silt = "Silt%",
-#           OM = "OM%",
-#           P = "P/mg/kg",
-#           K = "K/Cmol/kg",
-#           Na = "Na/Cmol/kg")
 
 utm_coords <- metadata %>%
   mutate(
@@ -255,7 +214,7 @@ wgs84_coords %>%
 # Joint species distribution models at the genus level
 
 ```{r}
-amf_genus_rare <- read.table("outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.afm_rarefy_all_genus.txt", header = TRUE, stringsAsFactors = FALSE)
+amf_genus_rare <- read.table("outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.afm_rarefy_allgenus.txt", header = TRUE, stringsAsFactors = FALSE)
 
 Y_genus <- amf_genus_rare %>%
   remove_rownames() %>%
@@ -304,7 +263,6 @@ covariate_df %>%
   rownames_to_column("Sample_code") %>%
   mutate(Sample_code = as.factor(Sample_code)) -> covariate_standa_df
 ```
-
 
 ```{r}
 write.table(covariate_df, "outputs/data_for_models/covariate_df.txt")
