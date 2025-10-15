@@ -454,10 +454,8 @@ gelman_diag_df2$psrf
 
 beta_results <- postBeta2$mean
 rownames(beta_results) <- colnames(m_converg_selected$X)
-beta_results[!(postBeta2$support > 0.9 | postBeta2$support < 0.1)] <- NA
+beta_results[!(postBeta2$support > 0.95 | postBeta2$support < 0.05)] <- NA
 beta_results <- t(beta_results)[genus_tree$tip.label, colnames(m_converg_selected$X)]
-
-plotBeta(m_converg_selected, post = postBeta2, param = "Support")
 ```
 
 ```{r include=FALSE, purl = FALSE}
@@ -471,7 +469,7 @@ gelman_diag_bin_df2$psrf
 beta_results_bin <- postBeta2_bin$mean
 rownames(beta_results_bin) <- colnames(m_converg_selected_bin$X)
 
-beta_results_bin[!(postBeta2_bin$support > 0.9 | postBeta2_bin$support < 0.1)] <- NA
+beta_results_bin[!(postBeta2_bin$support > 0.95 | postBeta2_bin$support < 0.05)] <- NA
 beta_results_bin <- t(beta_results_bin)[genus_tree$tip.label, colnames(m_converg_selected_bin$X)]
 ```
 ### genus response to each varaibles
@@ -620,10 +618,9 @@ lambda_df %>%
                           model== "bin" ~ "Occurence")) %>%
   ggplot() +
   geom_point(aes(lambda, covariate, fill = model, alpha = p_value <= 0.05), cex = 4,shape =21) +
-  geom_vline(xintercept = 0, linetype = 2) +
   geom_vline(xintercept = 1,linetype = 2) +
   scale_fill_viridis(discrete = T)+
-  labs(x = "Responce correlation to phylogeny", y= " Covariates", col = "Models", alpha = "p <= 0.05")+
+  labs(x = "Phylogenetic structure of responces", y= " Covariates", col = "Models", alpha = "p <= 0.05")+
   main_theme_final -> phylogentic_signal_genus_models
 
 ggsave(plot = phylogentic_signal_genus_models, filename = "figures/genus/phylogentic_signal_genus_models.pdf", units = "cm",
@@ -773,6 +770,7 @@ data_spatial_df <- ndvi_raster_df %>%
 ```
 
 # Get taxonomy
+
 ```{r}
 data_18S <- "data/18S_AMf_Eukaryome/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.table2"
 amf_taxonomic_levels_eucaryome <- c("kingdom", "phylum", "class", "order", "family",
@@ -806,8 +804,9 @@ taxomony_AMF_genuslevel <- data_18S %>%
            str_replace_all("[a-z]__", "Unknown ") %>%
            str_replace("_(\\d+)$", " (\\1 OTU)"))
 ```
+# Hole contry prediction
 
-# Occurence
+## Occurence
 
 ```{r, purl = FALSE}
 data_spatial_df %>%
@@ -925,10 +924,10 @@ map_occurence_allgenus
 map_richness
 ```
 
-# Abundance
+## Abundance
 
 ```{r, purl = FALSE}
-data_spatial_df %>%
+XData.grid %>%
    
     pivot_longer(-c(x,y)) %>%
     mutate( name = case_when(name == "ndvi" ~ "Biomass quantity index",
@@ -957,6 +956,7 @@ xy.grid <- data_spatial_df %>%
 
 XData.grid <- data_spatial_df %>%
   dplyr::select(-c(x, y))
+
 
 if(file.exists("outputs/models/abundance_prediction_map_genus.RData")){
   load("outputs/models/abundance_prediction_map_genus.RData")
@@ -1015,7 +1015,7 @@ Some genus are over predicted by the model in some condition making the abundanc
 
 
 
-## Glomeraceae prediction
+### Glomeraceae prediction
 
 ```{r, purl = FALSE}
 EpredY_abundance_df %>%
@@ -1047,7 +1047,7 @@ ggsave(plot = abundance_Glomeraceae_map, filename = "figures/genus/abundance_Glo
 abundance_Glomeraceae_map
 ```
 
-## Gigasporaceae prediction
+### Gigasporaceae prediction
 
 ```{r, purl = FALSE}
 EpredY_abundance_df %>%
@@ -1062,7 +1062,8 @@ EpredY_abundance_df %>%
 ggsave(plot = abundance_Gigasporaceae_map, filename = "figures/genus/abundance_Gigasporaceae_map.pdf", units = "cm", width = 12 ,height = 12 )
 abundance_Gigasporaceae_map
 ```
-## Acaulosporaceae prediction
+
+### Acaulosporaceae prediction
 
 ```{r, purl = FALSE}
 EpredY_abundance_df %>%
@@ -1078,7 +1079,8 @@ abundance_Acaulosporaceae_map
 
 ggsave(plot = abundance_Acaulosporaceae_map, filename = "figures/genus/abundance_Acaulosporaceae_map.pdf", units = "cm", width = 12 ,height = 12 )
 ```
-## Diversisporaceae prediction
+
+### Diversisporaceae prediction
 
 ```{r, purl = FALSE}
 EpredY_abundance_df %>%
@@ -1108,3 +1110,300 @@ EpredY_abundancesplit_divers %>%
 ggsave(plot = abundance_Diversisporaceae_map, filename = "figures/genus/abundance_Diversisporaceae_map.pdf", units = "cm", width = 12 ,height = 36 )
 abundance_Diversisporaceae_map
 ```
+
+# Limited environnemental gradient prediction
+
+```{r}
+ug_border <- read_sf("data/ug_shp/ug.shp")
+```
+
+## Occurence
+
+```{r, purl = FALSE}
+data_spatial_limited_df <-  data_spatial_df %>%
+  filter(max(covariate_standa_df$ndvi)>ndvi & min(covariate_standa_df$ndvi)<ndvi,
+         max(covariate_standa_df$precip)>precip & min(covariate_standa_df$precip)<precip,
+         max(covariate_standa_df$tmax)>tmax & min(covariate_standa_df$tmax)<tmax,
+         max(covariate_standa_df$tdelta)>tdelta & min(covariate_standa_df$tdelta)<tdelta,
+         max(covariate_standa_df$wind)>wind & min(covariate_standa_df$wind)<wind)
+
+data_spatial_limited_df %>%
+  pivot_longer(-c(x,y)) %>%
+  ggplot() +
+  facet_wrap(~name, scale = "free") +
+  geom_raster(aes(x, y, fill = value))
+
+# Prepare grid for limited gradient predictions
+xy.grid_limited <- data_spatial_limited_df %>%
+  dplyr::select(x, y) %>%  
+ 
+  as.matrix()
+
+XData.grid_limited <- data_spatial_limited_df %>%
+  dplyr::select(-c(x, y))
+```
+
+
+```{r, purl = FALSE}
+if(file.exists("outputs/models/occurence_prediction_map_genus_limited.RData")){
+  load("outputs/models/occurence_prediction_map_genus_limited.RData")
+}else{
+  Gradient_limited <-  prepareGradient(m_converg_selected_bin, XDataNew = XData.grid_limited, sDataNew = list(route = xy.grid_limited))
+  predY_bin_limited <- stats::predict(m_converg_selected_bin, Gradient = Gradient_limited)
+  
+  EpredY_bin_map_limited <- predY_bin_limited[[1]]
+  # Average over predictions
+  if (length(predY_bin_limited) > 1) {
+    for (i in 2:length(predY_bin_limited)) {
+      EpredY_bin_map_limited <- EpredY_bin_map_limited + predY_bin_limited[[i]] 
+      if (i %% 1000 == 0) print(i)
+    }
+    EpredY_bin_map_limited <- EpredY_bin_map_limited / length(predY_bin_limited)
+  }
+  save(EpredY_bin_map_limited, file = "outputs/models/occurence_prediction_map_genus_limited.RData")
+}
+```
+
+```{r}
+recap_pred_bin_df %>%
+  filter(mod_ID == "mod_full", AUC >0.75| is.na(AUC)) 
+```
+
+```{r, purl = FALSE}
+
+all(balanced_score_df$pred_name == colnames(EpredY_bin_map_limited))
+
+EpredY_bin_map_limited <- EpredY_bin_map_limited[,balanced_score_df$pred_name]
+balanced_score_df$pred_name == colnames(EpredY_bin_map_limited)
+EpredY_occurance_map_limited <- sweep(EpredY_bin_map_limited, 2,
+                       balanced_score_df$threshold, 
+                     FUN = function(x, th) x < th)
+EpredY_occurance_map_limited <- +EpredY_occurance_map_limited
+```
+
+
+```{r, purl = FALSE}
+colnames(EpredY_occurance_map_limited)
+data_spatial_limited_df %>%
+  bind_cols(EpredY_occurance_map_limited) %>%
+  mutate(pixel_ID = as.factor(1:n())) %>%
+  pivot_longer(-c(pixel_ID,x, y, ndvi, precip, tmax, tdelta, wind), values_to = "occurence", names_to = "genus") %>%
+  mutate(occurence = as.factor(occurence)) %>%
+  left_join(taxomony_AMF_genuslevel, by = "genus") -> EpredY_occurance_df_limited
+```
+
+
+```{r, purl = FALSE}
+EpredY_occurance_df_limited %>%
+  ggplot() +
+    geom_sf(data = ug_border, alpha =0.4) +
+    facet_wrap(~genus) +
+    geom_tile(aes(x, y, fill = occurence)) +
+    scale_fill_viridis(discrete = T, option = "viridis", begin = 0.05, end = 0.6) +
+     labs(x = "Longitude", y = "Latitude", fill = "Occurence") + 
+    theme_classic() +
+    theme(
+      aspect.ratio = 1,
+      plot.margin = margin(0, 0, 0, 0),
+      axis.title.x = element_blank(),
+      panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+      axis.title.y = element_text(colour = "black", size = 14, face = "italic")
+    ) -> map_occurence_allgenus_limited
+
+
+EpredY_occurance_df_limited %>%
+  filter(!str_detect(genus, "Unknown")) %>%
+  group_by(pixel_ID) %>%
+  summarise(richness = sum(as.numeric(as.character(occurence))),
+            x = first(x),
+            y = first(y)) %>%
+    ggplot() +
+      #facet_wrap(~name) +
+      geom_sf(data = ug_border, alpha =0.4) +
+      geom_tile(aes(x, y, fill = richness)) +
+      annotation_north_arrow(
+        location = "tr",
+        which_north = "true",
+        height = unit(1, "cm"),
+        width  = unit(1, "cm"),
+        style = north_arrow_minimal(
+          line_col = "black",   # outline color
+          fill     = "black",
+          text_col = "black",
+          line_width = 2,
+          text_size  = 10
+        )) +
+      scale_fill_viridis(option = "magma", limits = c(0, 26)) +
+      labs(x = "Longitude", y = "Latitude", fill = "Known genus richness") +
+      main_theme_final -> map_richness_limited
+
+
+
+ggsave(plot = map_occurence_allgenus_limited, filename = "figures/genus/map_occurence_allgenus_limited.pdf", units = "cm",width = 48 ,height = 48)
+ggsave(plot = map_richness_limited, filename = "figures/genus/map_richness_limited.pdf", units = "cm", width = 12 ,height = 12)
+
+map_occurence_allgenus_limited
+map_richness_limited
+```
+
+## Abundance
+
+
+```{r, purl = FALSE}
+# Prepare grid for gradient predictions
+xy.grid_limited <- data_spatial_limited_df %>%
+  dplyr::select(x, y) %>%
+  as.matrix()
+
+XData.grid_limited <- data_spatial_limited_df %>%
+  dplyr::select(-c(x, y))
+
+
+if(file.exists("outputs/models/abundance_prediction_map_genus_limited.RData")){
+  load("outputs/models/abundance_prediction_map_genus_limited.RData")
+}else{
+  Gradient_limited <-  prepareGradient(list_mods_crossvalidation[[6]]$hmsc_mod, XDataNew = XData.grid_limited, sDataNew = list(route = xy.grid_limited))
+  predY_limited <- stats::predict(m_converg_selected, Gradient = Gradient_limited)
+
+  EpredY_map_limited <- predY_limited[[1]]
+  
+  
+  # Average over predictions
+  if (length(predY_limited) > 1) {
+    for (i in 2:length(predY_limited)) {
+      EpredY_map_limited <- EpredY_map_limited + predY_limited[[i]]
+      if (i %% 1000 == 0) print(i)
+    }
+    EpredY_map_limited <- EpredY_map_limited / length(predY_limited)
+  }
+  save(EpredY_map_limited,file = "outputs/models/abundance_prediction_map_genus_limited.RData")
+}
+```
+
+
+
+```{r, purl = FALSE}
+summary(EpredY_map_limited)
+
+EpredY_map_limited %>%
+  as.data.frame() %>%
+  pivot_longer(everything()) %>%
+  group_by(name) %>%
+  summarise(mean_values = max(value)) %>%
+  arrange(desc(mean_values)) -> max_predY_df_limited
+```
+
+
+```{r, purl = FALSE}
+data_spatial_limited_df %>%
+  bind_cols(EpredY_map_limited) %>%
+  mutate(pixel_ID = as.factor(1:n())) %>%
+  pivot_longer(-c(pixel_ID,x, y, ndvi, precip, tmax, tdelta, wind), values_to = "abundance", names_to = "genus") %>%
+  left_join(taxomony_AMF_genuslevel, by = "genus") -> EpredY_abundance_df_limited
+```
+
+
+```{r, purl = FALSE}
+EpredY_abundance_df_limited %>%
+    ggplot() +
+    facet_wrap(~genus) +
+    geom_raster(aes(x, y, fill = abundance)) +
+    scale_fill_viridis(option = "magma") +
+    labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
+    main_theme_final
+```
+Some genus are over predicted by the model in some condition making the abundance scale way to high to see something
+
+
+
+## Glomeraceae prediction
+
+
+```{r, purl = FALSE}
+EpredY_abundance_df_limited %>%
+  filter(family == "f__Glomeraceae") %>% 
+  group_by(genus) %>%
+  summarise(mean_abund = max(abundance)) %>%
+  arrange(desc(mean_abund)) %>%
+  pull(genus) -> odred_Glomeraceae_limited
+
+EpredY_abundance_df_limited %>%
+  filter(family == "f__Glomeraceae") %>%
+  mutate(genus = factor(genus, levels = odred_Glomeraceae_limited)) %>%
+  ggplot() + 
+    geom_sf(data = ug_border, alpha =0.4) +
+    facet_wrap(~genus) +
+   
+    geom_tile(aes(x, y, fill = abundance)) +
+    
+    ## you need to pass the unique group and color identifier to your scale
+    scale_fill_viridis(option = "magma", limits = c(0,13.25)) +
+    labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
+    main_theme_final -> abundance_Glomeraceae_map_limited
+
+ggsave(plot = abundance_Glomeraceae_map_limited, filename = "figures/genus/abundance_Glomeraceae_map_limited.pdf", units = "cm", width = 48 ,height = 48)
+
+abundance_Glomeraceae_map_limited
+```
+
+## Gigasporaceae prediction
+
+```{r, purl = FALSE}
+EpredY_abundance_df_limited %>%
+  filter(family == "f__Gigasporaceae") %>%
+    ggplot() +
+    facet_wrap(~genus) +
+    geom_sf(data = ug_border, alpha =0.4) +
+    geom_tile(aes(x, y, fill = abundance)) +
+    scale_fill_viridis(option = "magma") +
+    labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
+    main_theme_final -> abundance_Gigasporaceae_map_limited
+
+ggsave(plot = abundance_Gigasporaceae_map_limited, filename = "figures/genus/abundance_Gigasporaceae_map_limited.pdf", units = "cm", width = 12 ,height = 12 )
+abundance_Gigasporaceae_map_limited
+```
+
+## Acaulosporaceae prediction
+
+```{r, purl = FALSE}
+EpredY_abundance_df_limited %>%
+  filter(family == "f__Acaulosporaceae") %>%
+    ggplot() +
+    facet_wrap(~genus) +
+    geom_sf(data = ug_border, alpha =0.4) +
+    geom_tile(aes(x, y, fill = abundance)) +
+    scale_fill_viridis(option = "magma") +
+    labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
+    main_theme_final -> abundance_Acaulosporaceae_map_limited
+
+abundance_Acaulosporaceae_map_limited
+
+ggsave(plot = abundance_Acaulosporaceae_map_limited, filename = "figures/genus/abundance_Acaulosporaceae_map_limited.pdf", units = "cm", width = 12 ,height = 12 )
+```
+
+## Diversisporaceae prediction
+
+```{r, purl = FALSE}
+EpredY_abundance_df_limited %>%
+  filter(family == "f__Diversisporaceae") %>% 
+  group_by(genus) %>%
+  summarise(mean_abund = max(abundance)) %>%
+  arrange(desc(mean_abund)) %>%
+  pull(genus) -> odred_Diversisporaceae_limited
+
+EpredY_abundancesplit_divers_limited <- EpredY_abundance_df_limited %>%
+  filter(family == "f__Diversisporaceae") %>%
+  mutate(genus = factor(genus, levels = odred_Diversisporaceae_limited)) %>%
+  ggplot() +
+    facet_wrap(~genus) +
+    geom_sf(data = ug_border, alpha =0.4) +
+    geom_tile(aes(x, y, fill = abundance)) +
+    ## you need to pass the unique group and color identifier to your scale
+    scale_fill_viridis(option = "magma",limits = c(0,6.7))+
+    labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
+    main_theme_final -> abundance_Diversisporaceae_map_limited
+abundance_Diversisporaceae_map_limited
+ggsave(plot = abundance_Diversisporaceae_map_limited, filename = "figures/genus/abundance_Diversisporaceae_map_limited.pdf", units = "cm", width = 36 ,height = 12 )
+```
+
+

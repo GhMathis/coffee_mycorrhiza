@@ -53,19 +53,6 @@ main_theme_final = theme_bw() +
 ## Sampling points
 ```{r echo=FALSE}
 metadata <- read_xlsx(path = "data/Metadata_Doreen_070525.xlsx")
-soil_metadata <- read_xlsx(path = "data/soil_data_dry_season_2023.xlsx") %>% 
-  dplyr::select(-c(Zone, Cluster, Replicate,`Robusta coffee system`)) %>%
-  rename(Sample_code = "SAMPLE NO",
-          clay = "Clay%",
-          N = "N%",
-          OC = "OC%",
-          pH = "soil pH",
-          sand= "Sand%",
-          silt = "Silt%",
-          OM = "OM%",
-          P = "P/mg/kg",
-          K = "K/Cmol/kg",
-          Na = "Na/Cmol/kg")
 
 utm_coords <- metadata %>%
   mutate(
@@ -124,7 +111,7 @@ ggsave(plot = ug_sampling_map, filename = "figures/genus/ug_sampling_map.pdf", u
 ```
 
 ```{r}
-amf_genus_rare <- read.table("outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.afm_rarefy_all_genus.txt", header = TRUE, stringsAsFactors = FALSE)
+amf_genus_rare <- read.table("outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.afm_rarefy_allgenus.txt", header = TRUE, stringsAsFactors = FALSE)
 genus_tree <- read.tree("outputs/phylo_tree/Robust_MiSeq_18S_AMf_20241120_125_samples_Eukaryome_Glomeromycota_genus.tree")
 
 plot(genus_tree)
@@ -210,7 +197,8 @@ Y_genus %>%
   geom_col(aes(Sample_code, value, fill =name))+
   scale_fill_viridis(discrete = T) +
   main_theme_final +
-  theme(axis.text.x = element_text(angle = 45))
+  theme(axis.text.x = element_text(angle = 45)) -> relative_abundance_genus_per_sample
+ggsave(plot = relative_abundance_genus_per_sample, filename = "figures/genus/relative_abundance_genus_per_sample.pdf", units = "cm", width = 38 ,height = 24)
 ```
 
 
