@@ -209,6 +209,10 @@ cluster_genus <- amf_OTUs_rare %>%
 ```
 
 ```{r}
+tree_amf <- read.tree(file = "data/18S_AMf_Eukaryome/Robust_MiSeq_18S_AMf_20241120_125_samples_Eukaryome_Glomeromycota.tree")
+```
+
+```{r}
 # 1. Compute full pairwise patristic distance matrix between OTUs
 dist_mat <- cophenetic.phylo(tree_amf)  # matrix of tip-to-tip distances
 
