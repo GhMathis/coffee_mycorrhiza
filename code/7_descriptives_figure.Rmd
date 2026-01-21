@@ -3,7 +3,7 @@ title: "Untitled"
 output: html_document
 date: "2025-09-25"
 editor_options: 
-  chunk_output_type: console
+  chunk_output_type: inline
 ---
 
 
@@ -123,18 +123,19 @@ plot(genus_tree)
 # Clean tip labels (example transformation)
 genus_rename <- genus_tree$tip.label %>%
   str_remove("g__") %>%
-  str_replace_all("[a-z]__", "Unknown ") %>%
-  str_replace("_(\\d+)$", " (\\1 OTU)")
-length(genus_rename)
+  str_replace_all("[a-z]__", "Unk. ") %>%
+  str_replace("_(\\d+)$", " (\\1 OTU)") %>%
+  str_replace("_", " ")
+
 genus_tree$tip.label <- genus_rename
-plot(genus_tree)
 
 # Prepare Y matrix for families
 amf_genus_rare <- amf_genus_rare %>%
   mutate(genus = genus %>%
            str_remove("g__") %>%
-           str_replace_all("[a-z]__", "Unknown ") %>%
-           str_replace("_(\\d+)$", " (\\1 OTU)")) %>%
+           str_replace_all("[a-z]__", "Unk. ") %>%
+           str_replace("_(\\d+)$", " (\\1 OTU)")%>%
+           str_replace("_", " ")) %>%
   remove_rownames() %>%
   column_to_rownames("genus")
 
@@ -182,8 +183,9 @@ data_18S %>%
             family = first(family)) %>%
     mutate(genus = genus %>%
            str_remove("g__") %>%
-           str_replace_all("[a-z]__", "Unknown ") %>%
-           str_replace("_(\\d+)$", " (\\1 OTU)")) -> df_tip_data_genus
+           str_replace_all("[a-z]__", "Unk. ") %>%
+           str_replace("_(\\d+)$", " (\\1 OTU)") %>%
+           str_replace("_", " ")) -> df_tip_data_genus
 ```
 
 
@@ -209,11 +211,13 @@ Y_genus %>%
   as.data.frame() %>%
   rownames_to_column("Sample_code") %>%
   pivot_longer(-Sample_code) %>%
+  mutate(name = str_replace(name,"Unknown ", "Unk. "),
+         name = str_replace(name, "_", " ")) %>%
   group_by(name) %>%
   summarise(sum_rarefied_reads_log = log(sum(value))) %>%
   left_join(df_tip_data_genus, by = join_by(name == genus)) %>%
   mutate(family = str_remove(family, "f__"),
-         family = str_replace(family, "[*]", "Unknown")) -> sum_reads_genus_df
+         family = str_replace(family, "[*]", "Unk.")) -> sum_reads_genus_df
 
 p_tree_genus <- ggtree(genus_tree, layout = "roundrect") + # %<+% sum_reads_df
   geom_tiplab(size=3, align = T, linesize=.5) +
@@ -225,9 +229,19 @@ p_tree_genus +
                 aes(x = sum_rarefied_reads_log,
                 fill = family), orientation = 'y', width = .6) +
   scale_fill_manual(values = watlington()[c(3:7,9:13,8)]) +
-  main_theme_final -> tree_sum_read_plot
+  theme_classic() +
+  theme(
+    aspect.ratio = 1,
+    legend.position = "bottom",
+    plot.margin = margin(0, 0, 0, 0),
+    axis.title.x = element_text(colour = "black", size = 13),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+    axis.title.y = element_text(colour = "black", size = 13),
+    strip.text.x = element_text(size = 13),
+    legend.title=element_text(size=13)
+  ) -> tree_sum_read_plot
 tree_sum_read_plot
-ggsave(plot = tree_sum_read_plot, filename = "figures/genus/tree_sum_read_plot.pdf", units = "cm",height = 15, width = 28)
+ggsave(plot = tree_sum_read_plot, filename = "figures/genus/tree_sum_read_plot.pdf", units = "cm",height = 28, width = 28)
 ```
 
 
