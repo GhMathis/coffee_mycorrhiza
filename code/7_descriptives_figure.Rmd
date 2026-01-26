@@ -20,6 +20,14 @@ library(pals)
 library(viridis)
 library(ggtree)
 
+# install.packages(
+#   "rnaturalearthhires",
+#   repos = "https://ropensci.r-universe.dev",
+#   type = "source"
+# )
+library(rnaturalearth)
+
+
 main_theme = theme_minimal() +
  theme(aspect.ratio = 1,
         axis.text.x = element_text(colour = "black", size=13, face="italic",angle =45, vjust =1, hjust =1),
@@ -47,6 +55,7 @@ main_theme_final = theme_bw() +
         strip.background = element_blank(),
         strip.text = element_text(margin = margin(0.05,0,0.05,0, "cm"),size = 7),
         title = element_text(colour = "black", size=9))
+
 ```
 # Spatial covariate
 
@@ -100,12 +109,14 @@ leaflet() %>%
 ```
 
 ```{r}
-ug_border <- read_sf("data/ug_shp/ug.shp")
+map_ug <- rnaturalearth::ne_states("Uganda", returnclass = "sf")
 
-ggplot(ug_border) +
+
+ggplot(map_ug) +
   geom_sf() +
-  geom_point(data =wgs84_coords, aes(x = lon,y = lat )) +
+  geom_point(data =wgs84_coords, aes(x = lon,y = lat)) +
   main_theme_final -> ug_sampling_map
+ug_sampling_map
 
 ggsave(plot = ug_sampling_map, filename = "figures/genus/ug_sampling_map.pdf", units = "cm", width = 12 ,height = 12)
 ```
@@ -205,8 +216,17 @@ ggsave(plot = relative_abundance_genus_per_sample, filename = "figures/genus/rel
 
 
 ```{r}
-library(pals)
+sum_reads_genus_df %>%
+  group_by(family) %>%
+  summarise(tot_read = sum(sum_rarefied_reads_log))%>%
+  ungroup() %>%
+  mutate(perc_totread = tot_read/sum(tot_read)) %>%
+  arrange(desc(perc_totread))
+```
 
+
+```{r}
+library(pals)
 Y_genus %>% 
   as.data.frame() %>%
   rownames_to_column("Sample_code") %>%

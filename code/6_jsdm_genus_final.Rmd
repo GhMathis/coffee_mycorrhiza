@@ -386,7 +386,6 @@ recap_pred_bin_df %>%
 #### AUC-ROC curve at genus level and 
 
 ```{r, purl = FALSE}
-
 1:ncol(Y_genus) %>%
   map(\(x) compute.ROC(observed =  list_mods_bin_crossvalidation[[6]]$m_converg$Y[,x], predicted = list_mods_bin_crossvalidation[[6]]$mPredY[,x],
             pred_name = colnames(list_mods_bin_crossvalidation[[6]]$m_converg$Y)[x])) %>%
@@ -394,7 +393,11 @@ recap_pred_bin_df %>%
   mutate(pred_name = str_replace_all(pred_name,"Unknown ", "Unk. "),
          pred_name = str_replace(pred_name, "_", " ")) -> ROC_df
 
+colSums(list_mods_bin_crossvalidation[[6]]$m_converg$Y)
+```
 
+
+```{r, purl = FALSE}
 ROC_df %>%
   group_by(pred_name) %>%
   filter(F1_score == max(F1_score, na.rm = TRUE)) %>%
@@ -403,7 +406,8 @@ ROC_df %>%
   mutate(threshold = case_when(pred_name %in% c("Unk. Glomeraceae (120 OTU)", 
                                                 "Acaulospora (88 OTU)", 
                                                 "Nanoglomus (128 OTU)",
-                                                "Sclerocystis (52 OTU)") ~ 1.1,
+                                                "Sclerocystis (52 OTU)") ~ 0,
+                          
                    .default = threshold)) -> max_f1_score_df
 ROC_df %>%
   mutate(balanced_score = TPR-FPR) %>%
@@ -414,10 +418,17 @@ ROC_df %>%
   rename(TPR_b = "TPR", FPR_b = "FPR") %>%
   distinct() %>%
   rbind(.,data.frame(pred_name =  c("Acaulospora (88 OTU)", 
-                                                "Unk. Glomeraceae (120 OTU)"), threshold = 1.1, balanced_score =NA)) %>%
+                                                "Unk. Glomeraceae (120 OTU)"), threshold = 0, balanced_score =NA)) %>%
   mutate(threshold = case_when(pred_name %in% c("Nanoglomus (128 OTU)",
-                                              "Sclerocystis (52 OTU)") ~ 1.1,
-                 .default = threshold)) -> balanced_score_df
+                                              "Sclerocystis (52 OTU)") ~ 0,
+                               .default = threshold),
+         TPR_b = case_when(pred_name %in% c("Nanoglomus (128 OTU)",
+                                              "Sclerocystis (52 OTU)") ~ NA,
+                           .default = TPR_b),
+         FPR_b = case_when(pred_name %in% c("Nanoglomus (128 OTU)",
+                                              "Sclerocystis (52 OTU)") ~ NA,
+                           .default = FPR_b),
+                 ) -> balanced_score_df
 
 
 ROC_df %>%
@@ -666,14 +677,14 @@ lambda_df %>%
   theme_classic()+
   theme(aspect.ratio = 1,
         
-        axis.text.x = element_text(colour = "black", size=13, face="italic", angle = 18, vjust =1, hjust =1),
-        axis.text.y = element_text(colour = "black", size=13, face="italic"),
-        axis.title = element_text(colour = "black", size=16, face ="bold"),
+        axis.text.x = element_text(colour = "black", size=11, face="italic", angle = 18, vjust =1, hjust =1),
+        axis.text.y = element_text(colour = "black", size=11, face="italic"),
+        axis.title = element_text(colour = "black", size=14),
         panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
-        legend.title = element_text(colour = "black", size=16,
+        legend.title = element_text(colour = "black", size=14,
                                     hjust =0.5),
 
-        legend.text = element_text(colour = "black", size=13)) -> phylogentic_signal_genus_models
+        legend.text = element_text(colour = "black", size=11)) -> phylogentic_signal_genus_models
 
 ggsave(plot = phylogentic_signal_genus_models, filename = "figures/genus/phylogentic_signal_genus_models.pdf", units = "cm",
         height = 16, width = 16)
@@ -989,9 +1000,10 @@ balanced_score_df %>%
 all(balanced_score_df$pred_name == colnames(EpredY_bin_map))
 EpredY_bin_map <- EpredY_bin_map[,balanced_score_df$pred_name]
 balanced_score_df$pred_name == colnames(EpredY_bin_map)
+
 EpredY_occurance_map <- sweep(EpredY_bin_map, 2,
                        balanced_score_df$threshold, 
-                     FUN = function(x, th) x < th)
+                     FUN = function(x, th) x > th)
 EpredY_occurance_map <- +EpredY_occurance_map
 ```
 
@@ -1059,7 +1071,7 @@ map_richness
 ```
 ```{r}
 balanced_score_df %>%
-  filter(TPR_b > 0.60 & FPR_b<0.25| threshold > 1) %>% 
+  filter(TPR_b > 0.60 & FPR_b<0.25| threshold == 0) %>% 
   pull(pred_name) -> best_predicted_occurence
 ```
 
@@ -1340,7 +1352,7 @@ EpredY_bin_map_limited <- EpredY_bin_map_limited[,balanced_score_df$pred_name]
 balanced_score_df$pred_name == colnames(EpredY_bin_map_limited)
 EpredY_occurance_map_limited <- sweep(EpredY_bin_map_limited, 2,
                        balanced_score_df$threshold, 
-                     FUN = function(x, th) x < th)
+                     FUN = function(x, th) x > th)
 EpredY_occurance_map_limited <- +EpredY_occurance_map_limited
 ```
 
@@ -1357,6 +1369,8 @@ data_spatial_limited_df %>%
 
 
 ```{r, purl = FALSE}
+
+
 EpredY_occurance_df_limited %>%
   ggplot() +
     geom_sf(data = ug_border, alpha =0.4) +
@@ -1374,6 +1388,9 @@ EpredY_occurance_df_limited %>%
     ) -> map_occurence_allgenus_limited
 
 
+map_ug <- rnaturalearth::ne_states("Uganda", returnclass = "sf")
+
+
 EpredY_occurance_df_limited %>%
   filter(!str_detect(genus, "Unk.")) %>%
   group_by(pixel_ID) %>%
@@ -1382,8 +1399,10 @@ EpredY_occurance_df_limited %>%
             y = first(y)) %>%
     ggplot() +
       #facet_wrap(~name) +
-      geom_sf(data = ug_border, alpha =0.4) +
-      geom_tile(aes(x, y, fill = richness)) +
+      geom_sf(data = map_ug, alpha =0.4) +
+      geom_tile(aes(x, y, fill = richness), alpha =0.9) +
+      geom_point(data =wgs84_coords, aes(x = lon,y = lat),cex = 1.3, shape =21, fill = "white", col = "black", alpha =0.6) +
+      
       annotation_north_arrow(
         location = "tr",
         which_north = "true",
@@ -1399,7 +1418,7 @@ EpredY_occurance_df_limited %>%
       scale_fill_viridis(option = "magma", limits = c(0, 26)) +
       labs(x = "Longitude", y = "Latitude", fill = "Known genus richness") +
       main_theme_final -> map_richness_limited
-
+map_richness_limited
 
 
 ggsave(plot = map_occurence_allgenus_limited, filename = "figures/genus/map_occurence_allgenus_limited.pdf", units = "cm",width = 48 ,height = 48)
@@ -1408,12 +1427,20 @@ ggsave(plot = map_richness_limited, filename = "figures/genus/map_richness_limit
 map_occurence_allgenus_limited
 map_richness_limited
 ```
+
 ```{r}
+balanced_score_df %>%
+  filter(TPR_b > 0.60 & FPR_b<0.25) %>%
+  dplyr::select(pred_name, TPR_b, FPR_b, threshold) 
+
 EpredY_occurance_df_limited %>%
-  filter(genus %in%best_predicted_occurence) %>%
-   ggplot() +
+  left_join(balanced_score_df, by= join_by ("genus" == "pred_name")) %>%
+  filter(TPR_b > 0.60 & FPR_b<0.25| threshold == 0) %>%
+  ggplot() +
     geom_sf(data = ug_border, alpha =0.4) +
     facet_wrap(~genus) +
+    geom_text(aes(30,4, label = paste("TPR =", round(TPR_b,2))), size = 3) +
+    geom_text(aes(30,3.5, label = paste("FPR =", round(FPR_b,2))), size = 3) +
     geom_tile(aes(x, y, fill = occurence)) +
     scale_fill_viridis(discrete = T, option = "viridis", begin = 0.05, end = 0.6) +
      labs(x = "Longitude", y = "Latitude", fill = "Occurence") + 
@@ -1429,7 +1456,6 @@ EpredY_occurance_df_limited %>%
       legend.title = element_text(size=13)
     ) -> map_occurence_limited_best_predicted_genus
 map_occurence_limited_best_predicted_genus
-
 ggsave(plot = map_occurence_limited_best_predicted_genus, filename = "figures/genus/map_occurence_limited_best_predicted_genus.pdf", units = "cm",width = 32 ,height = 32)
 
 ```
@@ -1508,19 +1534,25 @@ Some genus are over predicted by the model in some condition making the abundanc
 
 ```{r}
 RMSE_per_genus %>%
-  filter(relative_RMSE <0.5) %>%
+  filter(relative_RMSE <1) %>%
   pull(genus_names) -> best_predicted_abundance
 
+
+ 
 EpredY_abundance_df_limited %>%
-  filter(genus %in%best_predicted_abundance) %>%
+  left_join(RMSE_per_genus, by= join_by ("genus" == "genus_names")) %>%
+  filter(relative_RMSE <1) %>%
   group_by(genus) %>%
-  mutate(rescaled_abund = (abundance - min(abundance)) / (max(abundance) - min(abundance))) %>%
+  mutate(rescaled_abund = (abundance - min(abundance)) / (max(abundance) - min(abundance)),
+         average_abundance = mean(abundance)) %>%
    ggplot() +
     geom_sf(data = ug_border, alpha =0.4) +
     facet_wrap(~genus) +
+    geom_text(aes(31,4.3, label = paste("Relative RMSE = ", round(relative_RMSE,2))), size = 3) +
+   geom_text(aes(31,4, label = paste("Avg. A. (log) = ", round(average_abundance,2))), size = 3) +
     geom_tile(aes(x, y, fill = rescaled_abund)) +
     scale_fill_viridis(option = "magma") +
-    labs(x = "Longitude", y = "Latitude", fill = "Rescale abundances \n (relative to genus)") + 
+    labs(x = "Longitude", y = "Latitude", fill = "Rescale genus abundances") + 
     theme_classic() +
     theme(
       aspect.ratio = 1,
@@ -1535,7 +1567,7 @@ EpredY_abundance_df_limited %>%
 
 map_abundance_limited_best_predicted_genus
 
-ggsave(plot = map_abundance_limited_best_predicted_genus, filename = "figures/genus/map_abundance_limited_best_predicted_genus.pdf", units = "cm",width = 24 ,height = 24)
+ggsave(plot = map_abundance_limited_best_predicted_genus, filename = "figures/genus/map_abundance_limited_best_predicted_genus.pdf", units = "cm",width = 32 ,height = 32)
 ```
 
 

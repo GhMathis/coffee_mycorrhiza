@@ -68,6 +68,7 @@ amf_OTUs_decont <- amf_OTUs %>%
   pivot_wider(names_from = samples, values_from =  reads, values_fill = 0) %>%
   as_tibble() %>%
   column_to_rownames(var = "amplicon") 
+
 ```
 
 
