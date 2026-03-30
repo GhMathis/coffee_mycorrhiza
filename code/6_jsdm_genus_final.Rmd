@@ -16,7 +16,9 @@ library(viridis)
 library(Hmsc)
 
 library(ape)
+# BiocManager::install("ggtree")
 library(ggtree)
+
 library(nlme)
 library(ggspatial)
 library(patchwork)
@@ -489,8 +491,16 @@ postBeta2 <- getPostEstimate(m_converg_selected, parName = "Beta")
 beta_results <- postBeta2$mean
 mpost2 <- convertToCodaObject(m_converg_selected)
 gelman.diag(mpost2$Beta, multivariate = FALSE) -> gelman_diag_df2
-gelman_diag_df2$psrf
+effectiveSize(mpost2$Beta) -> effective_size_beta
+effective_size_beta %>%hist(, breaks = 50)
+gelman_diag_df2$psrf[,1] %>% hist(, breaks = 50)
 
+gelman.diag(mpost2$Rho, multivariate = FALSE)
+effectiveSize(mpost2$Rho)
+```
+
+
+```{r include=FALSE, purl = FALSE}
 beta_results <- postBeta2$mean
 rownames(beta_results) <- colnames(m_converg_selected$X)
 colnames(beta_results) <- str_replace(colnames(beta_results), "Unknown ", "Unk. ")
@@ -506,8 +516,20 @@ postBeta2_bin <- getPostEstimate(m_converg_selected_bin, parName = "Beta")
 beta_results_bin <- postBeta2_bin$mean
 mpost2_bin <- convertToCodaObject(m_converg_selected_bin)
 gelman.diag(mpost2_bin$Beta, multivariate = FALSE) -> gelman_diag_bin_df2
-gelman_diag_bin_df2$psrf
 
+effectiveSize(mpost2_bin$Beta) -> effective_size_beta_bin
+
+effective_size_beta %>%hist(, breaks = 50)
+gelman_diag_bin_df2$psrf[,1] %>% hist(, breaks = 50)
+
+gelman.diag(mpost2_bin$Rho, multivariate = FALSE)
+effectiveSize(mpost2_bin$Rho)
+
+
+```
+
+
+```{r include=FALSE, purl = FALSE}
 beta_results_bin <- postBeta2_bin$mean
 rownames(beta_results_bin) <- colnames(m_converg_selected_bin$X)
 colnames(beta_results_bin) <- str_replace(colnames(beta_results_bin), "Unknown ", "Unk. ")
@@ -1429,6 +1451,11 @@ map_richness_limited
 ```
 
 ```{r}
+balanced_score_df %>%
+    filter(pred_name %in% c("Entrophospora (40 OTU)", "Glomeraceae gen27 (6 OTU)", "Scutellospora (2 OTU)","Unk. cl01 (27 OTU)"))%>%
+  arrange(desc(balanced_score)) 
+
+
 balanced_score_df %>%
   filter(TPR_b > 0.60 & FPR_b<0.25) %>%
   dplyr::select(pred_name, TPR_b, FPR_b, threshold) 

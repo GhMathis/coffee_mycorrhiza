@@ -41,13 +41,24 @@ Y_genus <- Y_genus[,genus_tree$tip.label ]
 
 
 ## ----echo=FALSE---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+covariate_standa_df[,c("lon", "lat")] %>% duplicated() -> temp 
+covariate_standa_df %>%
+  filter(lon == covariate_standa_df[temp,c("lon")],
+         lat == covariate_standa_df[temp,c("lat")] )
+# ROB_F7_s and ROB_F6_s have the same coordinates due to gps precision.
+# Add a very small coordinate variation to ROB_F7_s for hmsc to accept cordiante data (hmcs dont take duplicated coordiante). It is also closer to the reality because ROB_F7_s and ROB_F6_s dont overlap.
+
+covariate_standa_df[temp,c("lon", "lat")] <- covariate_standa_df[temp,c("lon", "lat")] + 0.0001
+xy <- covariate_standa_df[,c("lon", "lat", "Sample_code")] %>%
+  remove_rownames() %>%
+  column_to_rownames("Sample_code")
 studyDesign <- data.frame(sample = rownames(Y_genus), stringsAsFactors = TRUE)
-rL <- HmscRandomLevel(units = studyDesign$sample)
+rL <- HmscRandomLevel(sData = xy, longlat = T)
 
 
 ## ----echo=FALSE---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 mod_pois_null <- Hmsc(
-  Y = log1p(Y_genus),
+  Y = Y_genus,
   XData =  covariate_standa_df,
   XFormula = ~ 1,
   phyloTree = genus_tree,
@@ -58,7 +69,7 @@ mod_pois_null <- Hmsc(
 
 
 mod_pois_ndvi <- Hmsc(
-  Y = log1p(Y_genus),
+  Y = Y_genus,
   XData = covariate_standa_df,
   XFormula = ~ ndvi,
   phyloTree = genus_tree,
@@ -69,7 +80,7 @@ mod_pois_ndvi <- Hmsc(
 
 
 mod_pois_precip <- Hmsc(
-  Y = log1p(Y_genus),
+  Y = Y_genus,
   XData = covariate_standa_df,
   XFormula = ~ precip,
   phyloTree = genus_tree,
@@ -79,7 +90,7 @@ mod_pois_precip <- Hmsc(
 )
 
 mod_pois_tmax <- Hmsc(
-  Y = log1p(Y_genus),
+  Y = Y_genus,
   XData =  covariate_standa_df,
   XFormula = ~ tmax,
   phyloTree = genus_tree,
@@ -89,7 +100,7 @@ mod_pois_tmax <- Hmsc(
 )
 
 mod_pois_wind  <- Hmsc(
-  Y = log1p(Y_genus),
+  Y = Y_genus,
   XData = covariate_standa_df,
   XFormula = ~ wind,
   phyloTree = genus_tree,
@@ -99,7 +110,7 @@ mod_pois_wind  <- Hmsc(
 )
 
 mod_pois_full <- Hmsc(
-  Y = log1p(Y_genus),
+  Y = Y_genus,
   XData = covariate_standa_df,
   XFormula = ~ ndvi + precip + tmax +tdelta + wind,
   phyloTree = genus_tree,
@@ -109,7 +120,7 @@ mod_pois_full <- Hmsc(
 )
 
 mod_pois_interaction <- Hmsc(
-  Y = log1p(Y_genus),
+  Y = Y_genus,
   XData = covariate_standa_df,
   XFormula = ~ (ndvi + precip + tmax +tdelta + wind)^2,
   phyloTree = genus_tree,
@@ -119,7 +130,7 @@ mod_pois_interaction <- Hmsc(
 )
 
 mod_pois_poly <- Hmsc(
-  Y = log1p(Y_genus),
+  Y = Y_genus,
   XData = covariate_standa_df,
   XFormula = ~poly(ndvi,2) + poly(precip,2) + poly(tmax,2) + poly(tdelta,2) + poly(wind,2),
   phyloTree = genus_tree,
@@ -186,13 +197,13 @@ compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 10,   test.run = T){
 
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 1:length(model_list) %>%
-  purrr::map(\(x) compute.hmsc(model_list[[x]], nfold = nfolds, nChains = nChains,   test.run = test_run)) -> list_mods_crossvalidation
+  furrr::map(\(x) compute.hmsc(model_list[[x]], nfold = nfolds, nChains = nChains,   test.run = test_run)) -> list_mods_crossvalidation
 
 if(file.exists("outputs/models/list_mods_crossvalidation_genus_pois_log.RData")){
   # safe save in case a model list in already present in the folder
-  save(list_mods_crossvalidation, file = "outputs/models/list_mods_crossvalidation_genus_pois_log_safesave.RData")
+  save(list_mods_crossvalidation, file = "outputs/models/list_mods_crossvalidation_genus_pois_autocorr_safesave.RData")
   }else{
-  save(list_mods_crossvalidation, file = "outputs/models/list_mods_crossvalidation_genus_pois_log.RData")
+  save(list_mods_crossvalidation, file = "outputs/models/list_mods_crossvalidation_genus_pois_autocorr.RData")
 }
 
 
@@ -305,12 +316,12 @@ model_bin_list <- list(
 
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 1:length(model_bin_list) %>%
-  purrr::map(\(x) compute.hmsc(model_bin_list[[x]], nfold = nfolds, nChains = nChains,   test.run = test_run)) -> list_mods_bin_crossvalidation
+  furrr::map(\(x) compute.hmsc(model_bin_list[[x]], nfold = nfolds, nChains = nChains,   test.run = test_run)) -> list_mods_bin_crossvalidation
 
 if(file.exists("outputs/models/list_mods_bin_crossvalidation_genus.RData")){
   # safe save in case a model list in already present in the folder
-  save(list_mods_bin_crossvalidation, file = "outputs/models/list_mods_bin_crossvalidation_genus_safesave.RData")
+  save(list_mods_bin_crossvalidation, file = "outputs/models/list_mods_bin_crossvalidation_genus_autocorr_safesave.RData")
   }else{
-  save(list_mods_bin_crossvalidation, file = "outputs/models/list_mods_bin_crossvalidation_genus.RData")
+  save(list_mods_bin_crossvalidation, file = "outputs/models/list_mods_bin_crossvalidation_autocorr_genus.RData")
 }
 
