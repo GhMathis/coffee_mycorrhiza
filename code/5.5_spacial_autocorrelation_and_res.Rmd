@@ -1,0 +1,208 @@
+---
+title: "4.5_spatial_autocorrelation"
+output: html_document
+date: "2026-03-30"
+---
+
+```{r}
+
+covariate_standa_df <- read.table("outputs/data_for_models/covariate_standa_df.txt", stringsAsFactors = T)
+Y_genus <- read.table("outputs/data_for_models/Y_genus.txt")
+```
+
+```{r}
+covariate_standa_df %>%
+  remove_rownames() %>%
+  column_to_rownames("Sample_code") %>%
+  dplyr::select(lon, lat)  -> covariate.xy
+covariate.xy %>%
+  as.matrix() %>%
+  dist() -> sample.dist
+
+dist(Y_genus) -> composition.dist
+```
+
+```{r}
+colnames(sample.dist) == colnames(composition.dist)
+rownames(sample.dist) == rownames(composition.dist)
+```
+
+```{r}
+library(ade4)
+library(vegan)
+
+mantel.rtest(sample.dist, composition.dist, nrepet = 9999) -> mantel_test_results
+mantel_test_results
+plot(mantel_test_results)
+```
+
+
+```{r}
+community_distance_hellinger <- vegan::vegdist(Y_genus, method = "hellinger")
+community_distance_hellinger
+composition.dist
+mantel.rtest(sample.dist, community_distance_hellinger, nrepet = 9999) -> mantel_test_helling_results
+plot(mantel_test_helling_results)
+```
+
+```{r}
+genus.hel <- decostand(Y_genus, "hellinger")
+
+genus.hel.resid <- resid(lm(as.matrix(genus.hel) ~ ., data=covariate.xy))
+
+
+genus.hel.D <- dist(genus.hel.resid)
+
+genus.correlog <- mantel.correlog(community_distance_hellinger, XY=covariate.xy, nperm=999)
+summary(genus.correlog)
+genus.correlog   
+plot(genus.correlog)
+
+genus.correlog2 <- mantel.correlog(community_distance_hellinger, XY=covariate.xy, cutoff=FALSE, 
+   r.type="spearman", nperm=999)
+summary(genus.correlog2)
+genus.correlog2
+plot(genus.correlog2)
+```
+```{r}
+load(file = "outputs/models/list_mods_crossvalidation_genus_pois_log.RData")
+
+# 1. Compute predicted values from the fitted model object 'm'
+preds <- computePredictedValues(list_mods_crossvalidation[[6]]$m_converg)
+str(preds)
+# 2. Calculate the posterior mean of the predictions
+preds.mean <- apply(preds, FUN = mean, MARGIN =  c(1, 2))
+str(preds.mean)
+# 3. Calculate raw residuals by subtracting predictions from observed data 'Y'
+#    Note: Y must be a matrix matching the model's response structure
+raw_residuals <- Y_genus - preds.mean
+
+str(raw_residuals)
+
+genus.res.D <- dist(raw_residuals)
+
+genus_res.correlog <- mantel.correlog(genus.res.D, XY=covariate.xy, nperm=9999)
+summary(genus_res.correlog)
+genus_res.correlog   
+plot(genus_res.correlog)
+
+genus_res.correlog2 <- mantel.correlog(genus.res.D, XY=covariate.xy, cutoff=FALSE, 
+   r.type="spearman", nperm=9999)
+summary(genus_res.correlog2)
+genus_res.correlog2
+plot(genus_res.correlog2)
+```
+# DHARMa
+
+```{r}
+library(DHARMa)
+?DHARMa
+```
+
+```{r}
+Y <- list_mods_crossvalidation[[6]]$m_converg$Y
+# -----------------------------------------------------------------------------
+# 2. Compute posterior predictive draws
+#    preds has dimensions [sites x species x posterior_draws]
+# -----------------------------------------------------------------------------
+preds <- computePredictedValues(list_mods_crossvalidation[[6]]$m_converg) 
+ 
+cat("preds dimensions (sites x species x posterior_draws):\n")
+cat(dim(preds), "\n\n")
+ 
+# -----------------------------------------------------------------------------
+# 3. Run DHARMa diagnostics — one species at a time
+#
+#    createDHARMa() requires:
+#      simulatedResponse : matrix [n_obs  x  n_simulations]  ← preds[, j, ]
+#      observedResponse  : vector [n_obs]                    ← Y[, j]
+#      fittedPredictedResponse : vector [n_obs] (posterior mean, optional but recommended)
+# -----------------------------------------------------------------------------
+ 
+dharma_results <- vector("list", ncol(Y))
+names(dharma_results) <- colnames(Y)
+ 
+for (j in seq_len(ncol(Y))) {
+ 
+  sp_name <- colnames(Y)[j]
+  cat("Processing species:", sp_name, "\n")
+ 
+  # Posterior draws for species j → [n_sites x n_draws] matrix
+  sim_matrix <- preds[, j, ]          # dim: [50 x 400]
+ 
+  # Posterior mean (used as fittedPredictedResponse)
+  fitted_mean <- rowMeans(sim_matrix) # length 50
+ 
+  # Observed values for species j → vector
+  obs_vector  <- Y[, j]              # length 50
+ 
+  dharma_results[[j]] <- createDHARMa(
+    simulatedResponse      = sim_matrix,
+    observedResponse       = obs_vector,
+    fittedPredictedResponse = fitted_mean,
+    integerResponse        = TRUE      # TRUE for counts/presence-absence
+  )
+}
+```
+
+
+```{r}
+# -----------------------------------------------------------------------------
+# 4. Inspect results for a single species
+# -----------------------------------------------------------------------------
+sp_to_plot <- 1   # change index to inspect other species
+ 
+cat("\n--- DHARMa diagnostics for:", names(dharma_results)[sp_to_plot], "---\n")
+ 
+# Standard DHARMa plot (uniformity + dispersion + outliers)
+plot(dharma_results[[sp_to_plot]],
+     main = paste("DHARMa residuals —", names(dharma_results)[sp_to_plot]))
+ 
+# Individual tests
+testUniformity(dharma_results[[sp_to_plot]])   # KS test for uniform distribution
+testDispersion(dharma_results[[sp_to_plot]])   # over/under-dispersion
+testOutliers(dharma_results[[sp_to_plot]])     # outlier detection
+```
+
+```{r}
+for(sp in 1:length(dharma_results)){
+plot(dharma_results[[sp]],
+     main = paste("DHARMa residuals —", names(dharma_results)[sp]))
+  }
+
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# 5. (Optional) Loop over all species to flag problematic ones
+# -----------------------------------------------------------------------------
+cat("\n--- Summary across all species ---\n")
+ 
+for (j in seq_along(dharma_results)) {
+  ks <- suppressWarnings(
+    ks.test(residuals(dharma_results[[j]]), "punif")$p.value
+  )
+  flag <- if (ks < 0.05) "  *** potential misfit ***" else ""
+  cat(sprintf("  %-20s  KS p = %.3f%s\n", names(dharma_results)[j], ks, flag))
+}
+ 
+# -----------------------------------------------------------------------------
+# 6. (Optional) Aggregate residuals across all species for a global check
+#    Useful for spotting systematic issues across the full community model
+# -----------------------------------------------------------------------------
+all_sim <- do.call(rbind, lapply(seq_len(ncol(Y)), function(j) preds[, j, ]))
+all_obs <- as.vector(Y)                              # column-major stacking
+all_fit <- rowMeans(all_sim)
+ 
+global_dharma <- createDHARMa(
+  simulatedResponse       = all_sim,
+  observedResponse        = all_obs,
+  fittedPredictedResponse = all_fit,
+  integerResponse         = TRUE
+)
+ 
+cat("\n--- Global (all species pooled) DHARMa diagnostics ---\n")
+plot(global_dharma, main = "Global DHARMa residuals (all species)")
+testUniformity(global_dharma)
+```
+

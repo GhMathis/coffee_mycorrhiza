@@ -2,7 +2,7 @@
 library(tidyverse)
 library(Hmsc)
 library(ape)
-
+library(furrr)
 
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 test_run = T # For test, take few minutes
@@ -12,7 +12,7 @@ if(test_run){
   nChains = 2
 }else{
   nfolds =10
-  nChains = 10
+  nChains = 20
 }
 
 
@@ -32,14 +32,21 @@ genus_tree$tip.label <- genus_rename
 
 Y_genus <- Y_genus %>%
   rename_with(. %>%
-           str_remove("g__") %>%
-           str_replace_all("[a-z]__", "Unknown ") %>%
-           str_replace("_(\\d+)$", " (\\1 OTU)"))
+                str_remove("g__") %>%
+                str_replace_all("[a-z]__", "Unknown ") %>%
+                str_replace("_(\\d+)$", " (\\1 OTU)"))
 
 genus_tree$tip.label %in% colnames(Y_genus)
 Y_genus <- Y_genus[,genus_tree$tip.label ]
 
-
+Y_genus <- Y_genus %>%
+  as.data.frame() %>%
+  rownames_to_column("soil_code") %>%
+  pivot_longer(-soil_code) %>%
+  mutate(value = ifelse(value == 0, NA, value)) %>%
+  pivot_wider(names_from = name, values_from = value) %>%
+  column_to_rownames("soil_code") %>%
+  log()
 ## ----echo=FALSE---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 covariate_standa_df[,c("lon", "lat")] %>% duplicated() -> temp 
 covariate_standa_df %>%
@@ -64,7 +71,8 @@ mod_pois_null <- Hmsc(
   phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "poisson"
+  distr = "normal",
+  YScale = TRUE
 )
 
 
@@ -75,7 +83,8 @@ mod_pois_ndvi <- Hmsc(
   phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "poisson"
+  distr = "normal",
+  YScale = TRUE
 )
 
 
@@ -86,7 +95,8 @@ mod_pois_precip <- Hmsc(
   phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "poisson"
+  distr = "normal",
+  YScale = TRUE
 )
 
 mod_pois_tmax <- Hmsc(
@@ -96,7 +106,8 @@ mod_pois_tmax <- Hmsc(
   phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "poisson"
+  distr = "normal",
+  YScale = TRUE
 )
 
 mod_pois_wind  <- Hmsc(
@@ -106,7 +117,8 @@ mod_pois_wind  <- Hmsc(
   phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "poisson"
+  distr = "normal",
+  YScale = TRUE
 )
 
 mod_pois_full <- Hmsc(
@@ -116,7 +128,8 @@ mod_pois_full <- Hmsc(
   phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "poisson"
+  distr = "normal",
+  YScale = TRUE
 )
 
 mod_pois_interaction <- Hmsc(
@@ -126,7 +139,8 @@ mod_pois_interaction <- Hmsc(
   phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "poisson"
+  distr = "normal",
+  YScale = TRUE
 )
 
 mod_pois_poly <- Hmsc(
@@ -136,7 +150,8 @@ mod_pois_poly <- Hmsc(
   phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "poisson"
+  distr = "normal",
+  YScale = TRUE
 )
 
 
@@ -153,8 +168,8 @@ model_list <- list(
 
 
 ## ----echo=FALSE---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 10,   test.run = T){
-
+compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 10, samples = 2000,  test.run = T){
+  
   if (test.run){
     #with this option, the vignette runs fast but results are not reliable
     thin = 5
@@ -165,7 +180,6 @@ compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 10,   test.run = T){
     #with this option, the vignette evaluates slow but it reproduces the results of the
     #.pdf version
     thin = 5
-    samples = 2000
     transient = 1000*thin
     verbose = 1000*thin
   }
@@ -175,35 +189,36 @@ compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 10,   test.run = T){
     thin = thin, samples = samples, transient = transient,
     nChains = nChains, verbose = verbose, nParallel = nChains)
   
-  set.seed(92828)
-  partition = createPartition(m_converg, nfolds = nfold, column = "sample")
+  #  set.seed(92828)
+  #  partition = createPartition(m_converg, nfolds = nfold, column = "sample")
+  #  
+  #  expl_power = computePredictedValues(m_converg, thin = thin, nParallel = nChains)
+  #  MF_expl = evaluateModelFit(hM = m_converg, predY = expl_power) 
+  #  
+  #  #Predictive power based on cross-validation  
+  #
+  #  pred_power = computePredictedValues(m_converg, partition = partition, thin = thin, nParallel = nChains)
+  #  MF_pred = evaluateModelFit(hM = m_converg, predY = pred_power)
+  #  
+  #  mPredY <- apply(abind::abind(pred_power, along = 3), c(1, 2), matrixStats::mean2)
+  #  
+  #  colnames(mPredY) <- colnames(m_converg$Y)
+  #  rownames(mPredY) <- rownames(m_converg$Y)
   
-  expl_power = computePredictedValues(m_converg, thin = thin, nParallel = nChains)
-  MF_expl = evaluateModelFit(hM = m_converg, predY = expl_power) 
-  
-  #Predictive power based on cross-validation  
-
-  pred_power = computePredictedValues(m_converg, partition = partition, thin = thin, nParallel = nChains)
-  MF_pred = evaluateModelFit(hM = m_converg, predY = pred_power)
-  
-  mPredY <- apply(abind::abind(pred_power, along = 3), c(1, 2), matrixStats::mean2)
-  
-  colnames(mPredY) <- colnames(m_converg$Y)
-  rownames(mPredY) <- rownames(m_converg$Y)
-  
-  list(hmsc_mod = hmsc_mod, m_converg = m_converg , mPredY = mPredY, MF_expl = MF_expl, MF_pred = MF_pred)
-  }
-
+  list(hmsc_mod = hmsc_mod, m_converg = m_converg) 
+  # , mPredY = mPredY, MF_expl = MF_expl, MF_pred = MF_pred)
+}
 
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-1:length(model_list) %>%
-  furrr::map(\(x) compute.hmsc(model_list[[x]], nfold = nfolds, nChains = nChains,   test.run = test_run)) -> list_mods_crossvalidation
+model_list %>%
+  purrr::map(\(x) compute.hmsc(x, nfold = nfolds, nChains = nChains, samples = 2000,  test.run = test_run)
+  ) -> list_mods
 
-if(file.exists("outputs/models/list_mods_crossvalidation_genus_pois_log.RData")){
+if(file.exists("outputs/models/list_mods_genus_pois_autocorr.RData")){
   # safe save in case a model list in already present in the folder
-  save(list_mods_crossvalidation, file = "outputs/models/list_mods_crossvalidation_genus_pois_autocorr_safesave.RData")
-  }else{
-  save(list_mods_crossvalidation, file = "outputs/models/list_mods_crossvalidation_genus_pois_autocorr.RData")
+  save(list_mods, file = "outputs/models/list_mods_genus_pois_autocorr_safesave.RData")
+}else{
+  save(list_mods, file = "outputs/models/list_mods_genus_pois_autocorr.RData")
 }
 
 
@@ -213,7 +228,7 @@ Y_genus_bin <- Y_genus %>%
   as.data.frame() %>%
   rownames_to_column("soil_code") %>%
   pivot_longer(-soil_code) %>%
-  mutate(value = ifelse(value == 0, 0, 1)) %>%
+  mutate(value = ifelse(is.na(value), 0, 1)) %>%
   pivot_wider(names_from = name, values_from = value) %>%
   column_to_rownames("soil_code")
 
@@ -315,13 +330,17 @@ model_bin_list <- list(
 
 
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-1:length(model_bin_list) %>%
-  furrr::map(\(x) compute.hmsc(model_bin_list[[x]], nfold = nfolds, nChains = nChains,   test.run = test_run)) -> list_mods_bin_crossvalidation
 
-if(file.exists("outputs/models/list_mods_bin_crossvalidation_genus.RData")){
+
+model_bin_list %>%
+  purrr::map(\(x) compute.hmsc(x, nfold = nfolds, nChains = nChains, samples = 1000, test.run = test_run)
+             )-> list_mods_bin
+
+if(file.exists("outputs/models/list_mods_bin_autocorr_genus.RData")){
   # safe save in case a model list in already present in the folder
-  save(list_mods_bin_crossvalidation, file = "outputs/models/list_mods_bin_crossvalidation_genus_autocorr_safesave.RData")
-  }else{
-  save(list_mods_bin_crossvalidation, file = "outputs/models/list_mods_bin_crossvalidation_autocorr_genus.RData")
+  save(list_mods_bin, file = "outputs/models/list_mods_bin__autocorr_genus_safesave.RData")
+}else{
+  save(list_mods_bin, file = "outputs/models/list_mods_bin_autocorr_genus.RData")
 }
+
 
