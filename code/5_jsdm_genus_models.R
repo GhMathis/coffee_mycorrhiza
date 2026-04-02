@@ -119,6 +119,16 @@ mod_pois_wind  <- Hmsc(
   distr = "poisson",
   YScale = TRUE
 )
+mod_pois_full <-  Hmsc(
+  Y = Y_genus,
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "poisson",
+  YScale = TRUE
+)
 
 mod_pois_interaction <- Hmsc(
   Y = Y_genus,
