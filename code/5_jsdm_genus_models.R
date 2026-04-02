@@ -5,7 +5,7 @@ library(ape)
 library(furrr)
 
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-test_run = F # For test, take few minutes
+test_run = T # For test, take few minutes
 # test_run = F # True run, need 2 day to compute on 10 physical core with a frequency of approximately 4.6 GHz 
 if(test_run){
   nfolds = 2
@@ -70,7 +70,7 @@ mod_pois_null <- Hmsc(
   phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "normal",
+  distr = "poisson",
   YScale = TRUE
 )
 
@@ -82,7 +82,7 @@ mod_pois_ndvi <- Hmsc(
   phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "normal",
+  distr = "poisson",
   YScale = TRUE
 )
 
@@ -94,7 +94,7 @@ mod_pois_precip <- Hmsc(
   phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "normal",
+  distr = "poisson",
   YScale = TRUE
 )
 
@@ -105,7 +105,7 @@ mod_pois_tmax <- Hmsc(
   phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "normal",
+  distr = "poisson",
   YScale = TRUE
 )
 
@@ -116,64 +116,10 @@ mod_pois_wind  <- Hmsc(
   phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "normal",
-  YScale = TRUE
-)
-
-########
-mod_lognorm_pois_full <- Hmsc(
-  Y = Y_genus,
-  XData = covariate_standa_df,
-  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
-  phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "lognormal poisson",
-  YScale = TRUE
-)
-mod_pois_full <- Hmsc(
-  Y = Y_genus,
-  XData = covariate_standa_df,
-  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
-  phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
   distr = "poisson",
   YScale = TRUE
 )
 
-mod_lognorm_pois_full_trunc_data <- Hmsc(
-  Y = Y_genus_trunc,
-  XData = covariate_standa_df,
-  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
-  phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "lognormal poisson",
-  YScale = TRUE
-)
-mod_pois_full_trunc_data <- Hmsc(
-  Y = Y_genus_trunc,
-  XData = covariate_standa_df,
-  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
-  phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "poisson",
-  YScale = TRUE
-)
-
-mod_norm_full_trunc_log_data <- Hmsc(
-  Y = log(Y_genus_trunc),
-  XData = covariate_standa_df,
-  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
-  phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "normal",
-  YScale = TRUE
-)
-########
 mod_pois_interaction <- Hmsc(
   Y = Y_genus,
   XData = covariate_standa_df,
@@ -181,7 +127,7 @@ mod_pois_interaction <- Hmsc(
   phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "normal",
+  distr = "poisson",
   YScale = TRUE
 )
 
@@ -192,7 +138,7 @@ mod_pois_poly <- Hmsc(
   phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "normal",
+  distr = "poisson",
   YScale = TRUE
 )
 
