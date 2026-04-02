@@ -5,7 +5,7 @@ library(ape)
 library(furrr)
 
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-test_run = T # For test, take few minutes
+test_run = F # For test, take few minutes
 # test_run = F # True run, need 2 day to compute on 10 physical core with a frequency of approximately 4.6 GHz 
 if(test_run){
   nfolds = 2
@@ -39,14 +39,13 @@ Y_genus <- Y_genus %>%
 genus_tree$tip.label %in% colnames(Y_genus)
 Y_genus <- Y_genus[,genus_tree$tip.label ]
 
-Y_genus <- Y_genus %>%
+Y_genus_trunc <- Y_genus %>%
   as.data.frame() %>%
   rownames_to_column("soil_code") %>%
   pivot_longer(-soil_code) %>%
   mutate(value = ifelse(value == 0, NA, value)) %>%
   pivot_wider(names_from = name, values_from = value) %>%
-  column_to_rownames("soil_code") %>%
-  log()
+  column_to_rownames("soil_code") 
 ## ----echo=FALSE---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 covariate_standa_df[,c("lon", "lat")] %>% duplicated() -> temp 
 covariate_standa_df %>%
@@ -121,8 +120,51 @@ mod_pois_wind  <- Hmsc(
   YScale = TRUE
 )
 
+########
+mod_lognorm_pois_full <- Hmsc(
+  Y = Y_genus,
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "lognormal poisson",
+  YScale = TRUE
+)
 mod_pois_full <- Hmsc(
   Y = Y_genus,
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "poisson",
+  YScale = TRUE
+)
+
+mod_lognorm_pois_full_trunc_data <- Hmsc(
+  Y = Y_genus_trunc,
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "lognormal poisson",
+  YScale = TRUE
+)
+mod_pois_full_trunc_data <- Hmsc(
+  Y = Y_genus_trunc,
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
+  phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "poisson",
+  YScale = TRUE
+)
+
+mod_norm_full_trunc_log_data <- Hmsc(
+  Y = log(Y_genus_trunc),
   XData = covariate_standa_df,
   XFormula = ~ ndvi + precip + tmax +tdelta + wind,
   phyloTree = genus_tree,
@@ -131,7 +173,7 @@ mod_pois_full <- Hmsc(
   distr = "normal",
   YScale = TRUE
 )
-
+########
 mod_pois_interaction <- Hmsc(
   Y = Y_genus,
   XData = covariate_standa_df,
@@ -221,14 +263,12 @@ if(file.exists("outputs/models/list_mods_genus_pois_autocorr.RData")){
   save(list_mods, file = "outputs/models/list_mods_genus_pois_autocorr.RData")
 }
 
-
-
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Y_genus_bin <- Y_genus %>%
   as.data.frame() %>%
   rownames_to_column("soil_code") %>%
   pivot_longer(-soil_code) %>%
-  mutate(value = ifelse(is.na(value), 0, 1)) %>%
+  mutate(value = ifelse(value==0, 0, 1)) %>%
   pivot_wider(names_from = name, values_from = value) %>%
   column_to_rownames("soil_code")
 
