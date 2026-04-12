@@ -36,6 +36,8 @@ for (m in seq_along(list_mods)) {
   hist(psrf.beta[, 1], breaks = 50,
        main = paste("Gelman-Rubin PSRF —", model_names[m]),
        xlab = "PSRF (should be < 1.1)")
+
+  cat("WAIC:", computeWAIC(list_mods[[m]]$m_converg), "\n")
 }
 ```
 
@@ -152,6 +154,8 @@ for (m in seq_along(list_mods_bin)) {
   hist(psrf.beta[, 1], breaks = 50,
        main = paste("Gelman-Rubin PSRF —", model_names_bin[m]),
        xlab = "PSRF (should be < 1.1)")
+
+  cat("WAIC:", computeWAIC(list_mods_bin[[m]]$m_converg), "\n")
 }
 ```
 
