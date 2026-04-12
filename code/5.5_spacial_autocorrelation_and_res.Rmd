@@ -92,6 +92,60 @@ summary(genus_res.correlog2)
 genus_res.correlog2
 plot(genus_res.correlog2)
 ```
+
+```{r}
+# 1. Compute predicted values from the fitted model object 'm'
+Y <- list_mods[[3]]$m_converg$Y
+preds <- computePredictedValues(list_mods[[3]]$m_converg) 
+covariate.xy <- list_mods[[3]]$m_converg$XData[,c("lon", "lat")]
+str(preds)
+# 2. Calculate the posterior mean of the predictions
+preds.mean <- apply(preds, FUN = mean, MARGIN =  c(1, 2))
+str(preds.mean)
+# 3. Calculate raw residuals by subtracting predictions from observed data 'Y'
+#    Note: Y must be a matrix matching the model's response structure
+raw_residuals <- Y_genus - preds.mean
+
+str(raw_residuals)
+
+genus.res.D <- dist(raw_residuals)
+
+genus_res.correlog <- mantel.correlog(genus.res.D, XY=covariate.xy,cutoff=FALSE, nperm=9999)
+summary(genus_res.correlog)
+genus_res.correlog   
+plot(genus_res.correlog)
+
+genus_res.correlog2 <- mantel.correlog(genus.res.D, XY=covariate.xy, cutoff=FALSE, 
+   r.type="spearman", nperm=9999)
+summary(genus_res.correlog2)
+genus_res.correlog2
+plot(genus_res.correlog2)
+```
+# Convegence check
+
+```{r}
+model_name <- list(
+  "mod_pois_null",
+  "mod_pois_ndvi",
+  "mod_pois_precip",
+  "mod_pois_tmax",
+  "mod_pois_wind",
+  "mod_pois_three_precip",
+  "mod_pois_three_ndvi",
+  "mod_pois_four",
+  "mod_pois_full"
+)
+m = 9
+for (m in 3:9){
+  convertToCodaObject(list_mods[[m]][[2]]) -> mpost
+  gelman.diag(mpost$Beta, multivariate = FALSE)$psrf -> psrf.beta
+  effectiveSize(mpost$Beta) -> effective_size_beta
+  effective_size_beta %>% hist(breaks = 50, main =model_name[m])
+  psrf.beta[,1] %>% hist(breaks = 50, main =model_name[m])
+  }
+```
+
+
 # DHARMa
 
 ```{r}
@@ -100,12 +154,113 @@ library(DHARMa)
 ```
 
 ```{r}
-Y <- list_mods_crossvalidation[[6]]$m_converg$Y
+# =============================================================================
+# DHARMa whole-model residual diagnostics for HMSC — fixed spatial test
+# Groups by unique lon/lat pairs to guarantee no duplicate coordinates
+# =============================================================================
+
+for(m in 1:9){
+Y   <- list_mods[[m]]$m_converg$Y
+xy  <- list_mods[[m]]$m_converg$XData[, c("lon", "lat")]
+
+preds <- computePredictedValues(list_mods[[m]]$m_converg)
+
+n_sites   <- dim(preds)[1]
+n_species <- dim(preds)[2]
+n_draws   <- dim(preds)[3]
+
+site_ids  <- rownames(Y)
+
+# -----------------------------------------------------------------------------
+# Pool all species
+# -----------------------------------------------------------------------------
+all_sim_list <- vector("list", n_species)
+all_obs_list <- vector("list", n_species)
+all_fit_list <- vector("list", n_species)
+all_xy_list  <- vector("list", n_species)
+
+for (j in seq_len(n_species)) {
+
+  sim_j <- preds[, j, ]
+  obs_j <- Y[, j]
+  fit_j <- rowMeans(sim_j)
+  keep  <- !is.na(obs_j)
+
+  all_sim_list[[j]] <- sim_j[keep, , drop = FALSE]
+  all_obs_list[[j]] <- obs_j[keep]
+  all_fit_list[[j]] <- fit_j[keep]
+  all_xy_list[[j]]  <- xy[keep, , drop = FALSE]
+}
+length(all_sim_list)
+all_sim_matrix <- do.call(rbind, all_sim_list)
+all_obs_vector <- do.call(c,     all_obs_list)
+all_fit_vector <- do.call(c,     all_fit_list)
+all_xy_df      <- do.call(rbind, all_xy_list)   # n_valid_obs × 2, coords repeated per species
+
+# -----------------------------------------------------------------------------
+# Create DHARMa object
+# -----------------------------------------------------------------------------
+str(all_sim_matrix)
+dharma_global <- createDHARMa(
+  simulatedResponse       = all_sim_matrix,
+  observedResponse        = all_obs_vector,
+  fittedPredictedResponse = all_fit_vector,
+  integerResponse         = FALSE
+)
+# -----------------------------------------------------------------------------
+# Standard DHARMa diagnostics
+# -----------------------------------------------------------------------------
+plot(dharma_global, main = "DHARMa residuals — whole HMSC model")
+ 
+testUniformity(dharma_global)    # KS test: should be uniform [0,1]
+testDispersion(dharma_global)    # over/under-dispersion
+testOutliers(dharma_global)      # outlier fraction
+ 
+# -----------------------------------------------------------------------------
+# Group by unique lon/lat pairs
+#
+# Some site IDs may share identical coordinates → grouping by site ID still
+# leaves duplicate x,y values for testSpatialAutocorrelation.
+# Solution: build the group key directly from coordinate strings.
+# -----------------------------------------------------------------------------
+coord_key    <- paste(all_xy_df[, "lon"], all_xy_df[, "lat"], sep = "_")
+coord_factor <- factor(coord_key)
+
+cat("Unique coordinate groups:", nlevels(coord_factor), "\n")
+cat("Total pooled observations:", length(all_obs_vector), "\n\n")
+
+# Aggregate residuals to one per unique location
+dharma_per_site <- recalculateResiduals(
+  dharma_global,
+  group = coord_factor
+)
+
+# Extract one coordinate row per level, in the same order as factor levels
+level_idx <- match(levels(coord_factor), coord_key)
+xy_unique  <- all_xy_df[level_idx, ]
+
+cat("Rows in xy_unique:", nrow(xy_unique), "\n")
+cat("Any duplicate coordinates remaining:", anyDuplicated(xy_unique) > 0, "\n\n")
+
+# -----------------------------------------------------------------------------
+# Spatial autocorrelation test — now guaranteed unique coordinates
+# -----------------------------------------------------------------------------
+testSpatialAutocorrelation(
+  dharma_per_site,
+  x = xy_unique[, "lon"],
+  y = xy_unique[, "lat"]
+)}
+```
+
+
+```{r}
+Y <- list_mods[[6]]$m_converg$Y
+xy <- list_mods[[6]]$m_converg$XData[,c("lon", "lat")]
 # -----------------------------------------------------------------------------
 # 2. Compute posterior predictive draws
 #    preds has dimensions [sites x species x posterior_draws]
 # -----------------------------------------------------------------------------
-preds <- computePredictedValues(list_mods_crossvalidation[[6]]$m_converg) 
+preds <- computePredictedValues(list_mods[[6]]$m_converg) 
  
 cat("preds dimensions (sites x species x posterior_draws):\n")
 cat(dim(preds), "\n\n")
@@ -135,14 +290,23 @@ for (j in seq_len(ncol(Y))) {
  
   # Observed values for species j → vector
   obs_vector  <- Y[, j]              # length 50
- 
+  
+  sim_matrix <- sim_matrix[!is.na(obs_vector),]
+  fitted_mean <- fitted_mean[!is.na(obs_vector)]
+  xy_temp <- xy[!is.na(obs_vector),]
+  obs_vector <- obs_vector[!is.na(obs_vector)]
+
+  # obs_vector[is.na(obs_vector)] <- 0
   dharma_results[[j]] <- createDHARMa(
     simulatedResponse      = sim_matrix,
     observedResponse       = obs_vector,
     fittedPredictedResponse = fitted_mean,
-    integerResponse        = TRUE      # TRUE for counts/presence-absence
+    integerResponse        = F      # TRUE for counts/presence-absence
   )
+  print(testSpatialAutocorrelation(dharma_results[[j]], x = xy_temp[,"lon"], y = xy_temp[,"lat"]))
 }
+
+str(obs_vector)
 ```
 
 
@@ -168,41 +332,90 @@ testOutliers(dharma_results[[sp_to_plot]])     # outlier detection
 for(sp in 1:length(dharma_results)){
 plot(dharma_results[[sp]],
      main = paste("DHARMa residuals —", names(dharma_results)[sp]))
-  }
+  testDispersion(dharma_results[[sp]])
 
+  }
+``` 
+```{r include=FALSE, purl = FALSE}
+list_mods[[3]]$m_converg -> m_converg_selected # pois_full_log_NA
+postBeta2 <- getPostEstimate(m_converg_selected, parName = "Beta")
+beta_results <- postBeta2$mean
+mpost2 <- convertToCodaObject(m_converg_selected)
+gelman.diag(mpost2$Beta, multivariate = FALSE) -> gelman_diag_df2
+effectiveSize(mpost2$Beta) -> effective_size_beta
+effective_size_beta %>%hist(, breaks = 50)
+gelman_diag_df2$psrf[,1] %>% hist(, breaks = 50)
+Hmsc::computeWAIC(list_mods[[3]]$m_converg)
+gelman.diag(mpost2$Rho, multivariate = FALSE)
+effectiveSize(mpost2$Rho)
+```
+
+
+# Binary model
+
+```{r}
+load(file = "outputs/models/list_mods_bin_autocorr_genus.RData")
 ```
 
 ```{r}
+Y_bin <- list_mods_bin[[6]]$m_converg$Y
+xy <- list_mods_bin[[6]]$m_converg$XData[,c("lon", "lat")]
 # -----------------------------------------------------------------------------
-# 5. (Optional) Loop over all species to flag problematic ones
+# 2. Compute posterior predictive draws
+#    preds has dimensions [sites x species x posterior_draws]
 # -----------------------------------------------------------------------------
-cat("\n--- Summary across all species ---\n")
+preds_bin <- computePredictedValues(list_mods_bin[[6]]$m_converg) 
+
+cat("preds dimensions (sites x species x posterior_draws):\n")
+cat(dim(preds), "\n\n")
  
-for (j in seq_along(dharma_results)) {
-  ks <- suppressWarnings(
-    ks.test(residuals(dharma_results[[j]]), "punif")$p.value
+# -----------------------------------------------------------------------------
+# 3. Run DHARMa diagnostics — one species at a time
+#
+#    createDHARMa() requires:
+#      simulatedResponse : matrix [n_obs  x  n_simulations]  ← preds[, j, ]
+#      observedResponse  : vector [n_obs]                    ← Y[, j]
+#      fittedPredictedResponse : vector [n_obs] (posterior mean, optional but recommended)
+# -----------------------------------------------------------------------------
+ 
+dharma_results_bin <- vector("list", ncol(Y_bin))
+names(dharma_results_bin) <- colnames(Y_bin)
+ 
+for (j in seq_len(ncol(Y_bin))) {
+ 
+  sp_name <- colnames(Y_bin)[j]
+  cat("Processing species:", sp_name, "\n")
+ 
+  # Posterior draws for species j → [n_sites x n_draws] matrix
+  sim_matrix_bin <- +(preds_bin[, j, ]>0.7 )         # dim: [50 x 400]
+ 
+  # Posterior mean (used as fittedPredictedResponse)
+  fitted_med_bin <-apply(sim_matrix_bin, 1, median) 
+ 
+  # Observed values for species j → vector
+  obs_vector_bin  <- Y_bin[, j]              # length 50
+  
+  # sim_matrix_bin <- sim_matrix_bin[!is.na(obs_vector_bin),]
+  # fitted_mean_bin <- fitted_mean_bin[!is.na(obs_vector_bin)]
+  # xy_temp <- xy[!is.na(obs_vector_bin),]
+  # obs_vector_bin <- obs_vector[!is.na(obs_vector_bin)]
+
+  # obs_vector[is.na(obs_vector)] <- 0
+  dharma_results_bin[[j]] <- createDHARMa(
+    simulatedResponse      = sim_matrix_bin,
+    observedResponse       = obs_vector_bin,
+    fittedPredictedResponse = fitted_med_bin,
+    integerResponse        = T      # TRUE for counts/presence-absence
   )
-  flag <- if (ks < 0.05) "  *** potential misfit ***" else ""
-  cat(sprintf("  %-20s  KS p = %.3f%s\n", names(dharma_results)[j], ks, flag))
+  #print(testSpatialAutocorrelation(dharma_results_bin[[j]], x = xy[,"lon"], y = xy[,"lat"]))
 }
- 
-# -----------------------------------------------------------------------------
-# 6. (Optional) Aggregate residuals across all species for a global check
-#    Useful for spotting systematic issues across the full community model
-# -----------------------------------------------------------------------------
-all_sim <- do.call(rbind, lapply(seq_len(ncol(Y)), function(j) preds[, j, ]))
-all_obs <- as.vector(Y)                              # column-major stacking
-all_fit <- rowMeans(all_sim)
- 
-global_dharma <- createDHARMa(
-  simulatedResponse       = all_sim,
-  observedResponse        = all_obs,
-  fittedPredictedResponse = all_fit,
-  integerResponse         = TRUE
-)
- 
-cat("\n--- Global (all species pooled) DHARMa diagnostics ---\n")
-plot(global_dharma, main = "Global DHARMa residuals (all species)")
-testUniformity(global_dharma)
+
 ```
 
+
+```{r}
+for(sp in 1:length(dharma_results_bin)){
+plot(dharma_results_bin[[sp]],
+     main = paste("DHARMa residuals —", names(dharma_results_bin)[sp]))
+  }
+``` 

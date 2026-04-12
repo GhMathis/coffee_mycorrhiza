@@ -2,17 +2,17 @@
 library(tidyverse)
 library(Hmsc)
 library(ape)
-library(furrr)
+
 
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-test_run = T # For test, take few minutes
+test_run = F # For test, take few minutes
 # test_run = F # True run, need 2 day to compute on 10 physical core with a frequency of approximately 4.6 GHz 
 if(test_run){
   nfolds = 2
   nChains = 2
 }else{
   nfolds =10
-  nChains = 20
+  nChains = 10
 }
 
 
@@ -61,95 +61,109 @@ xy <- covariate_standa_df[,c("lon", "lat", "Sample_code")] %>%
 studyDesign <- data.frame(sample = rownames(Y_genus), stringsAsFactors = TRUE)
 rL <- HmscRandomLevel(sData = xy, longlat = T)
 
-
+library(GGally)
+covariate_standa_df %>% 
+  select(-c(lon, lat, tmin, Sample_code)) %>%
+  GGally::ggpairs()
 ## ----echo=FALSE---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 mod_pois_null <- Hmsc(
-  Y = Y_genus,
+  Y = log(Y_genus_trunc),
   XData =  covariate_standa_df,
   XFormula = ~ 1,
-  phyloTree = genus_tree,
+  #phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "poisson",
-  YScale = TRUE
+  distr = "normal",
+  YScale = T
 )
 
-
 mod_pois_ndvi <- Hmsc(
-  Y = Y_genus,
+  Y = log(Y_genus_trunc),
   XData = covariate_standa_df,
   XFormula = ~ ndvi,
-  phyloTree = genus_tree,
+  # phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "poisson",
-  YScale = TRUE
+  distr = "normal",
+  YScale = T
 )
 
 
 mod_pois_precip <- Hmsc(
-  Y = Y_genus,
+  Y = log(Y_genus_trunc),
   XData = covariate_standa_df,
   XFormula = ~ precip,
-  phyloTree = genus_tree,
+  # phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "poisson",
-  YScale = TRUE
+  distr = "normal",
+  YScale = T
 )
 
 mod_pois_tmax <- Hmsc(
-  Y = Y_genus,
+  Y = log(Y_genus_trunc),
   XData =  covariate_standa_df,
   XFormula = ~ tmax,
-  phyloTree = genus_tree,
+  # phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "poisson",
-  YScale = TRUE
+  distr = "normal",
+  YScale = T
 )
 
 mod_pois_wind  <- Hmsc(
-  Y = Y_genus,
+  Y = log(Y_genus_trunc),
   XData = covariate_standa_df,
   XFormula = ~ wind,
-  phyloTree = genus_tree,
+  # phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "poisson",
-  YScale = TRUE
+  distr = "normal",
+  YScale = T
 )
+
+mod_pois_three_precip <-  Hmsc(
+  Y = log(Y_genus_trunc),
+  XData = covariate_standa_df,
+  XFormula = ~ precip + tmax +tdelta,
+  # phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "normal",
+  YScale = T
+)
+
+mod_pois_three_ndvi <-  Hmsc(
+  Y = log(Y_genus_trunc),
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi  + tmax +tdelta,
+  # phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "normal",
+  YScale = T
+)
+
+mod_pois_four <-  Hmsc(
+  Y = log(Y_genus_trunc),
+  XData = covariate_standa_df,
+  XFormula = ~ ndvi + precip + tmax +tdelta,
+  # phyloTree = genus_tree,
+  studyDesign = studyDesign,
+  ranLevels = list(sample = rL),
+  distr = "normal",
+  YScale = T
+)
+
 mod_pois_full <-  Hmsc(
-  Y = Y_genus,
+  Y = log(Y_genus_trunc),
   XData = covariate_standa_df,
   XFormula = ~ ndvi + precip + tmax +tdelta + wind,
-  phyloTree = genus_tree,
+  #phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
-  distr = "poisson",
-  YScale = TRUE
-)
-
-mod_pois_interaction <- Hmsc(
-  Y = Y_genus,
-  XData = covariate_standa_df,
-  XFormula = ~ (ndvi + precip + tmax +tdelta + wind)^2,
-  phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "poisson",
-  YScale = TRUE
-)
-
-mod_pois_poly <- Hmsc(
-  Y = Y_genus,
-  XData = covariate_standa_df,
-  XFormula = ~poly(ndvi,2) + poly(precip,2) + poly(tmax,2) + poly(tdelta,2) + poly(wind,2),
-  phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "poisson",
-  YScale = TRUE
+  distr = "normal",
+  YScale = T
 )
 
 
@@ -159,9 +173,10 @@ model_list <- list(
   mod_pois_precip    = mod_pois_precip,
   mod_pois_tmax      = mod_pois_tmax,
   mod_pois_wind      = mod_pois_wind,
-  mod_pois_full = mod_pois_full,
-  mod_pois_interaction = mod_pois_interaction,
-  mod_pois_poly = mod_pois_poly
+  mod_pois_three_precip = mod_pois_three_precip,
+  mod_pois_three_ndvi = mod_pois_three_ndvi,
+  mod_pois_four = mod_pois_four,
+  mod_pois_full = mod_pois_full
 )
 
 
@@ -177,7 +192,7 @@ compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 10, samples = 2000,  te
   } else {
     #with this option, the vignette evaluates slow but it reproduces the results of the
     #.pdf version
-    thin = 5
+    thin = 10
     transient = 1000*thin
     verbose = 1000*thin
   }
@@ -202,7 +217,7 @@ compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 10, samples = 2000,  te
   #  
   #  colnames(mPredY) <- colnames(m_converg$Y)
   #  rownames(mPredY) <- rownames(m_converg$Y)
-  
+  print(hmsc_mod)
   list(hmsc_mod = hmsc_mod, m_converg = m_converg) 
   # , mPredY = mPredY, MF_expl = MF_expl, MF_pred = MF_pred)
 }
@@ -210,13 +225,13 @@ compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 10, samples = 2000,  te
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 model_list %>%
   purrr::map(\(x) compute.hmsc(x, nfold = nfolds, nChains = nChains, samples = 2000,  test.run = test_run)
-  ) -> list_mods
-
+    ) -> list_mods
+list_mods$mod_pois_null$hmsc_mod$Y %>% str
 if(file.exists("outputs/models/list_mods_genus_pois_autocorr.RData")){
   # safe save in case a model list in already present in the folder
-  save(list_mods, file = "outputs/models/list_mods_genus_pois_autocorr_safesave.RData")
+  save(list_mods, file = "outputs/models/list_mods_genus_gauss_autocorr_safesave.RData")
 }else{
-  save(list_mods, file = "outputs/models/list_mods_genus_pois_autocorr.RData")
+  save(list_mods, file = "outputs/models/list_mods_genus_gauss_autocorr.RData")
 }
 
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------

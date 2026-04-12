@@ -81,7 +81,7 @@ mod_pois_null <- Hmsc(
   Y = Y_genus,
   XData =  covariate_standa_df,
   XFormula = ~ 1,
-  phyloTree = genus_tree,
+  # phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
   distr = "poisson"
@@ -91,7 +91,7 @@ mod_pois_ndvi <- Hmsc(
   Y = Y_genus,
   XData = covariate_standa_df,
   XFormula = ~ ndvi,
-  phyloTree = genus_tree,
+  # phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
   distr = "poisson"
@@ -102,7 +102,7 @@ mod_pois_precip <- Hmsc(
   Y = Y_genus,
   XData = covariate_standa_df,
   XFormula = ~ precip,
-  phyloTree = genus_tree,
+  # phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
   distr = "poisson"
@@ -112,7 +112,7 @@ mod_pois_tmax <- Hmsc(
   Y = Y_genus,
   XData =  covariate_standa_df,
   XFormula = ~ tmax,
-  phyloTree = genus_tree,
+  # phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
   distr = "poisson"
@@ -122,7 +122,7 @@ mod_pois_wind  <- Hmsc(
   Y = Y_genus,
   XData = covariate_standa_df,
   XFormula = ~ wind,
-  phyloTree = genus_tree,
+  # phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
   distr = "poisson"
@@ -132,7 +132,7 @@ mod_pois_full <- Hmsc(
   Y = Y_genus,
   XData = covariate_standa_df,
   XFormula = ~ ndvi + precip + tmax +tdelta + wind,
-  phyloTree = genus_tree,
+  # phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
   distr = "poisson"
@@ -142,7 +142,7 @@ mod_pois_interaction <- Hmsc(
   Y = Y_genus,
   XData = covariate_standa_df,
   XFormula = ~ (ndvi + precip + tmax +tdelta + wind)^2,
-  phyloTree = genus_tree,
+  # phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
   distr = "poisson"
@@ -152,7 +152,7 @@ mod_pois_poly <- Hmsc(
   Y = Y_genus,
   XData = covariate_standa_df,
   XFormula = ~poly(ndvi,2) + poly(precip,2) + poly(tmax,2) + poly(tdelta,2) + poly(wind,2),
-  phyloTree = genus_tree,
+  # phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
   distr = "poisson"
@@ -162,7 +162,7 @@ mod_precip_poly <- Hmsc(
   Y = Y_genus,
   XData = covariate_standa_df,
   XFormula = ~ poly(precip,2),
-  phyloTree = genus_tree,
+  # phyloTree = genus_tree,
   studyDesign = studyDesign,
   ranLevels = list(sample = rL),
   distr = "poisson"
@@ -185,7 +185,7 @@ model_list %>%
     x,
     thin = thin, samples = samples, transient = transient,
     nChains = nChains, verbose = verbose, nParallel = nChains)) -> list_mods
-
+computeWAIC(list_mods[[1]]$m_converg$)
 WAIC = unlist(lapply(list_mods, FUN = computeWAIC))
 WAIC
 
