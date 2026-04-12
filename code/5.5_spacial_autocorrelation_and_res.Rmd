@@ -117,11 +117,11 @@ for (m in seq_along(list_mods)) {
   level_idx <- match(levels(coord_factor), coord_key)
   xy_unique  <- all_xy_df[level_idx, ]
 
-  testSpatialAutocorrelation(
+  print(testSpatialAutocorrelation(
     dharma_per_site,
     x = xy_unique[, "lon"],
     y = xy_unique[, "lat"]
-  )
+  ))
 }
 ```
 
@@ -235,10 +235,10 @@ for (m in seq_along(list_mods_bin)) {
   level_idx <- match(levels(coord_factor), coord_key)
   xy_unique  <- all_xy_df[level_idx, ]
 
-  testSpatialAutocorrelation(
+  print(testSpatialAutocorrelation(
     dharma_per_site,
     x = xy_unique[, "lon"],
     y = xy_unique[, "lat"]
-  )
+  ))
 }
 ```
