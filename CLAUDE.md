@@ -28,7 +28,7 @@ The pipeline must be run in order (1 → 7) as each step produces outputs consum
 | `2_raster_formating.Rmd` | Preprocesses and formats raster data |
 | `3_rarefaction_AMF.Rmd` | Filters Glomeromycota/Mucoromycotina OTUs from 18S MiSeq data; rarefaction |
 | `4_setup_data_for_model.Rmd` | Merges spatial covariates with sample metadata; UTM → WGS84 conversion |
-| `5_jsdm_genus_models.R/.Rmd` | Fits Hmsc Joint Species Distribution Models at genus level |
+| `5_jsdm_genus_models.R` | Fits Hmsc Joint Species Distribution Models at genus level |
 | `5.5_spacial_autocorrelation_and_res.Rmd` | Spatial autocorrelation diagnostics on model residuals |
 | `6_jsdm_genus_final.Rmd` | Final model visualization and results |
 | `7_descriptives_figure.Rmd` | Descriptive statistics and maps |
