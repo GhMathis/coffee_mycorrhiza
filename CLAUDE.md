@@ -18,20 +18,29 @@ rmarkdown::render("code/3_rarefaction_AMF.Rmd")
 source("code/5_jsdm_genus_models.R")
 ```
 
-The pipeline must be run in order (1 → 7) as each step produces outputs consumed by the next.
+The pipeline must be run in order (1 → 10) as each step produces outputs consumed by the next.
 
 ## Pipeline Architecture
 
 | Script | Role |
 |--------|------|
-| `1_exctract_raster_data.Rmd` | Fetches NDVI rasters from Planetary Computer STAC API (Sentinel-3 Synergy, Uganda region) |
-| `2_raster_formating.Rmd` | Preprocesses and formats raster data |
+| `1_extract_raster_data.Rmd` | Fetches NDVI rasters from Planetary Computer STAC API (Sentinel-3 Synergy, Uganda region) |
+| `2_raster_formatting.Rmd` | Preprocesses and formats raster data |
 | `3_rarefaction_AMF.Rmd` | Filters Glomeromycota/Mucoromycotina OTUs from 18S MiSeq data; rarefaction |
 | `4_setup_data_for_model.Rmd` | Merges spatial covariates with sample metadata; UTM → WGS84 conversion |
-| `5_jsdm_genus_models.R` | Fits Hmsc Joint Species Distribution Models at genus level |
-| `5.5_spacial_autocorrelation_and_res.Rmd` | Spatial autocorrelation diagnostics on model residuals |
-| `6_jsdm_genus_final.Rmd` | Final model visualization and results |
-| `7_descriptives_figure.Rmd` | Descriptive statistics and maps |
+| `5_jsdm_genus_models.R` | Fits all 32 additive Hmsc JSDMs (Gaussian + probit) with phylo tree and spatial + iid random levels |
+| `6_convergence_diagnostics.Rmd` | Convergence checks (PSRF, WAIC) and DHARMa residual diagnostics |
+| `7_cross_validation_best_models.Rmd` | Cross-validation of best WAIC models (RMSE for Gaussian, AUC for probit) |
+| `8_jsdm_gauss_results.Rmd` | Gaussian (log-abundance) model results and figures |
+| `9_jsdm_bin_results.Rmd` | Probit (occurrence) model results and figures |
+| `10_descriptives_figure.Rmd` | Descriptive statistics and maps |
+
+### Deprecated
+
+| Script | Reason |
+|--------|--------|
+| `deprecated_6_jsdm_genus_final.Rmd` | Replaced by scripts 8 + 9; loads old model filenames |
+| `deprecated_5_timing_test.R` | Benchmark utility, not part of the pipeline |
 
 ## Key Data Paths
 
