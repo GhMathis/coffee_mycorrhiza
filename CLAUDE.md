@@ -18,7 +18,7 @@ rmarkdown::render("code/3_rarefaction_AMF.Rmd")
 source("code/5_jsdm_genus_models.R")
 ```
 
-The pipeline must be run in order (1 → 10) as each step produces outputs consumed by the next.
+The pipeline must be run in order (1 → 9) as each step produces outputs consumed by the next.
 
 ## Pipeline Architecture
 
@@ -31,16 +31,17 @@ The pipeline must be run in order (1 → 10) as each step produces outputs consu
 | `5_jsdm_genus_models.R` | Fits all 32 additive Hmsc JSDMs (Gaussian + probit) with phylo tree and spatial + iid random levels |
 | `6_convergence_diagnostics.Rmd` | Convergence checks (PSRF, WAIC) and DHARMa residual diagnostics |
 | `7_cross_validation_best_models.Rmd` | Cross-validation of best WAIC models (RMSE for Gaussian, AUC for probit) |
-| `8_jsdm_gauss_results.Rmd` | Gaussian (log-abundance) model results and figures |
-| `9_jsdm_bin_results.Rmd` | Probit (occurrence) model results and figures |
-| `10_descriptives_figure.Rmd` | Descriptive statistics and maps |
+| `8_jsdm_results.Rmd` | Combined Gaussian + Probit model results, merged effect/phylo-signal figures |
+| `9_descriptives_figure.Rmd` | Descriptive statistics and maps |
 
 ### Deprecated
 
 | Script | Reason |
 |--------|--------|
-| `deprecated_6_jsdm_genus_final.Rmd` | Replaced by scripts 8 + 9; loads old model filenames |
+| `deprecated_6_jsdm_genus_final.Rmd` | Replaced by script 8; loads old model filenames |
 | `deprecated_5_timing_test.R` | Benchmark utility, not part of the pipeline |
+| `deprecated_8_jsdm_gauss_results.Rmd` | Merged into `8_jsdm_results.Rmd` |
+| `deprecated_9_jsdm_bin_results.Rmd` | Merged into `8_jsdm_results.Rmd` |
 
 ## Key Data Paths
 

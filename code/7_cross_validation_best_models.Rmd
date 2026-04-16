@@ -254,10 +254,11 @@ rmse_gauss_df <- cv_gauss_df %>%
   summarise(
     RMSE      = sqrt(mean((pred - obs)^2, na.rm = TRUE)),
     mean_obs  = mean(obs, na.rm = TRUE),
+    mean_pred  = mean(pred, na.rm = TRUE),
     sd_obs    = sd(obs, na.rm = TRUE),
     .groups   = "drop"
   ) %>%
-  mutate(rel_RMSE = RMSE / sd_obs) %>%
+  mutate(rel_RMSE = RMSE / mean_obs) %>%
   arrange(RMSE)
 
 rmse_gauss_df %>%
@@ -265,39 +266,56 @@ rmse_gauss_df %>%
 ```
 
 ```{r gauss-rmse-plot, echo=FALSE, fig.height=8, fig.width=7}
+
 rmse_gauss_df %>%
-  mutate(genus = fct_reorder(genus, RMSE)) %>%
-  ggplot(aes(x = RMSE, y = genus)) +
-  geom_point(size = 2.5, color = "#E53935") +
-  geom_segment(aes(xend = 0, yend = genus), color = "#E53935", linewidth = 0.4) +
-  labs(x = "RMSE (cross-validated)",
+  mutate(genus = str_replace(genus, "OTU", "ASV"),
+         genus = fct_reorder(genus, rel_RMSE),
+         selected_genus = rank(rel_RMSE)<=12 ) %>%
+  ggplot(aes(x = rel_RMSE, y = genus, colour = selected_genus)) +
+  geom_point(size = 2.5) +
+  geom_segment(aes(xend = 0, yend = genus), linewidth = 0.4) +
+  scale_color_discrete(palette = c("#d1495b", "#00798c")) +
+  labs(x = "Realtive RMSE (cross-validated)",
        y = NULL,
-       title = paste("Predictive power -", best_gauss_name),
+       color = "12 best predicted genus",
        subtitle = paste(nfolds, "fold CV")) +
   main_theme_final +
-  theme(axis.text.y = element_text(size = 6)) -> rmse_plot
+  theme(axis.text.y = element_text(size = 9)) -> rmse_plot
 
 ggsave(plot = rmse_plot,
-       filename = "figures/genus_gauss_autocorr/rmse_cv_gauss_best_waic.pdf",
+       filename = "figures/genus_gauss_autocorr/relative_rmse_cv_gauss_best_waic.pdf",
        units = "cm", height = 18, width = 14)
 
 rmse_plot
 ```
 
 ```{r gauss-obs-vs-pred, echo=FALSE, fig.height=10, fig.width=10}
+
 cv_gauss_df %>%
-  mutate(genus = factor(genus, levels = rmse_gauss_df$genus)) %>%
+  group_by(genus) %>%
+  summarise(mean_abund = mean(obs,, na.rm =T)) %>%
+  arrange(mean_abund) %>%
+  pull(genus) -> order_genus_by_abund
+
+cv_gauss_df %>%
+  mutate(genus = str_replace(genus, "OTU", "ASV"),
+         genus = factor(genus, levels = str_replace(order_genus_by_abund, "OTU", "ASV")),
+         ) %>%
   ggplot(aes(obs, pred)) +
   facet_wrap(~genus) +
   geom_point(alpha = 0.6, size = 1.5) +
-  geom_abline(slope = 1, linetype = "dashed", color = "grey50") +
+  geom_abline(slope = 1, linetype = "dashed", color = "blue") +
   labs(x = "Observed abundance (log)", y = "Predicted abundance (log)",
-       title = paste("Observed vs predicted -", best_gauss_name)) +
+       title = paste("Observed vs predicted")) +
   main_theme_final +
-  theme(strip.text = element_text(size = 5)) -> obs_pred_gauss_plot
+  theme(strip.text = element_text(size = 9)) -> obs_pred_gauss_plot
 
 ggsave(plot = obs_pred_gauss_plot,
        filename = "figures/genus_gauss_autocorr/obs_vs_pred_cv_gauss_best_waic.pdf",
+       units = "cm", height = 24, width = 24)
+
+ggsave(plot = obs_pred_gauss_plot,
+       filename = "figures/figures_manuscript/obs_vs_pred_cv_gauss_best_waic.pdf",
        units = "cm", height = 24, width = 24)
 
 obs_pred_gauss_plot
@@ -316,6 +334,7 @@ auc_bin_df %>%
   arrange(desc(AUC)) %>%
   knitr::kable(digits = 3, caption = "AUC per genus (occurrence model, CV)")
 ```
+
 ```{r}
 mean(auc_bin_df$AUC, na.rm = T)
 ```
@@ -443,9 +462,12 @@ auc_bin2_df %>%
   arrange(desc(AUC)) %>%
   knitr::kable(digits = 3, caption = "AUC per genus (2nd best occurrence model, CV)")
 ```
+
+
 ```{r}
 mean(auc_bin2_df$AUC, na.rm = T)
 ```
+Cross validation is better for the second best model given by WAIC 
 
 ```{r bin2-auc-plot, echo=FALSE, fig.height=8, fig.width=7}
 auc_bin2_df %>%
@@ -500,6 +522,7 @@ ROC_df2 %>%
               rename(threshold_B = "threshold"),
             by = "pred_name") %>%
   arrange(threshold) %>%
+  mutate(pred_name = str_replace(pred_name, "OTU", "ASV")) %>%
   ggplot() +
   facet_wrap(~pred_name) +
   geom_path(aes(x = FPR, y = TPR), linewidth = 0.8) +
@@ -519,6 +542,9 @@ ggsave(plot = ROC_curve_plot2,
        filename = "figures/genus_bin_autocorr/ROC_curves_bin_second_best_waic.pdf",
        units = "cm", height = 24, width = 24)
 
+ggsave(plot = ROC_curve_plot2,
+       filename = "figures/figures_manuscript/ROC_curves_bin_second_best_waic.pdf",
+       units = "cm", height = 24, width = 24)
 ROC_curve_plot2
 ```
 
@@ -530,7 +556,8 @@ bind_rows(
   auc_bin2_df %>% mutate(model = second_bin_name)
 ) %>%
   filter(!is.na(AUC)) %>%
-  mutate(genus = fct_reorder(genus, AUC, .fun = max)) %>%
+  mutate(genus = str_replace(genus, "OTU", "ASV"),
+         genus = fct_reorder(genus, AUC, .fun = max)) %>%
   ggplot(aes(x = AUC, y = genus, color = model)) +
   geom_point(size = 2.5, position = position_dodge(width = 0.5)) +
   geom_vline(xintercept = 0.5, linetype = "dashed", color = "grey60") +
@@ -538,17 +565,20 @@ bind_rows(
   scale_color_manual(values = c("#2196F3", "#FF9800")) +
   labs(x = "AUC (cross-validated)",
        y = NULL,
-       color = "Model",
-       title = "AUC comparison: best vs second best occurrence model",
+       color = "Models",
+       title = "AUC comparison: best WAIC (orange) vs second best WAIC occurrence model (blue)",
        subtitle = paste(nfolds, "fold CV")) +
   main_theme_final +
-  theme(axis.text.y = element_text(size = 6),
+  theme(axis.text.y = element_text(size = 9),
+        legend.text =  element_text(size = 9),
         legend.position = "bottom") -> auc_comparison_plot
 
 ggsave(plot = auc_comparison_plot,
        filename = "figures/genus_bin_autocorr/auc_comparison_best_vs_second.pdf",
        units = "cm", height = 18, width = 16)
-
+ggsave(plot = auc_comparison_plot,
+       filename = "figures/figures_manuscript/auc_comparison_best_vs_second.pdf",
+       units = "cm", height = 18, width = 16)
 auc_comparison_plot
 ```
 
