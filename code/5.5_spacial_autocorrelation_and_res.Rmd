@@ -10,7 +10,7 @@ library(DHARMa)
 ```
 
 ```{r load-models}
-load(file = "outputs/models/list_mods_genus_gauss_autocorr.RData")
+load(file = "outputs/models/list_mods_genus_gauss_phylo_autocorr.RData")
 ```
 
 ```{r convergence}
@@ -19,6 +19,7 @@ load(file = "outputs/models/list_mods_genus_gauss_autocorr.RData")
 # =============================================================================
 
 model_names <- names(list_mods)
+WAIC_vecor <- c()
 
 for (m in seq_along(list_mods)) {
 
@@ -27,18 +28,20 @@ for (m in seq_along(list_mods)) {
   mpost <- convertToCodaObject(list_mods[[m]]$m_converg)
 
   psrf.beta          <- gelman.diag(mpost$Beta, multivariate = FALSE)$psrf
-  effective_size_beta <- effectiveSize(mpost$Beta)
-
-  hist(effective_size_beta, breaks = 50,
-       main = paste("Effective size —", model_names[m]),
-       xlab = "Effective sample size")
+  # effective_size_beta <- effectiveSize(mpost$Beta)
+  # 
+  # hist(effective_size_beta, breaks = 50,
+  #      main = paste("Effective size —", model_names[m]),
+  #      xlab = "Effective sample size")
 
   hist(psrf.beta[, 1], breaks = 50,
        main = paste("Gelman-Rubin PSRF —", model_names[m]),
        xlab = "PSRF (should be < 1.1)")
-
-  cat("WAIC:", computeWAIC(list_mods[[m]]$m_converg), "\n")
+  WAIC_vecor <- c(WAIC_vecor, computeWAIC(list_mods[[m]]$m_converg))
+  cat("WAIC:", WAIC_vecor[m], "\n")
 }
+WAIC_gauss_mod <- data.frame(WAIC_vecor = WAIC_vecor,model_names = model_names)
+save(WAIC_gauss_mod, file = "outputs/models/WAIC_gauss_mod.txt")
 ```
 
 ```{r dharma-whole-model}
@@ -46,7 +49,7 @@ for (m in seq_along(list_mods)) {
 # DHARMa whole-model residual diagnostics for HMSC — fixed spatial test
 # Groups by unique lon/lat pairs to guarantee no duplicate coordinates
 # =============================================================================
-
+m = 32
 for (m in seq_along(list_mods)) {
 
   cat("\n\n========== Model:", model_names[m], "==========\n")
@@ -54,7 +57,7 @@ for (m in seq_along(list_mods)) {
   Y   <- list_mods[[m]]$m_converg$Y
   xy  <- list_mods[[m]]$m_converg$XData[, c("lon", "lat")]
 
-  preds <- computePredictedValues(list_mods[[m]]$m_converg)
+  preds <-  (list_mods[[m]]$m_converg)
 
   n_sites   <- dim(preds)[1]
   n_species <- dim(preds)[2]
@@ -128,7 +131,7 @@ for (m in seq_along(list_mods)) {
 # Binary model
 
 ```{r load-models-bin}
-load(file = "outputs/models/list_mods_bin_autocorr_genus.RData")
+load(file = "outputs/models/list_mods_bin_phylo_autocorr_genus.RData")
 ```
 
 ```{r convergence-bin}
@@ -137,7 +140,7 @@ load(file = "outputs/models/list_mods_bin_autocorr_genus.RData")
 # =============================================================================
 
 model_names_bin <- names(list_mods_bin)
-
+WAIC_vecor_bin <- c()
 for (m in seq_along(list_mods_bin)) {
 
   cat("\n\n========== Model:", model_names_bin[m], "==========\n")
@@ -155,8 +158,11 @@ for (m in seq_along(list_mods_bin)) {
        main = paste("Gelman-Rubin PSRF —", model_names_bin[m]),
        xlab = "PSRF (should be < 1.1)")
 
-  cat("WAIC:", computeWAIC(list_mods_bin[[m]]$m_converg), "\n")
+  WAIC_vecor_bin <- c(WAIC_vecor_bin, computeWAIC(list_mods_bin[[m]]$m_converg))
+  cat("WAIC:", WAIC_vecor_bin[m], "\n")
 }
+WAIC_bin_mod <- data.frame(WAIC_vecor_bin = WAIC_vecor_bin,model_names_bin = model_names_bin)
+write.table(WAIC_bin_mod, file = "outputs/models/WAIC_bin_mod.txt")
 ```
 
 ```{r dharma-whole-model-bin}
