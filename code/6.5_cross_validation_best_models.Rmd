@@ -1,0 +1,563 @@
+---
+title: "6.5 - Cross-validation predictive power (best WAIC models)"
+output: html_document
+date: "2026-04-14"
+editor_options:
+  chunk_output_type: inline
+---
+
+Cross-validated predictive power for the two best models (by WAIC):
+
+- **Gaussian** (log-abundance) -- evaluated with RMSE per genus
+- **Probit** (occurrence) -- evaluated with AUC-ROC per genus
+
+# 1 -- Packages & themes
+
+```{r packages, include=FALSE}
+library(tidyverse)
+library(Hmsc)
+library(ape)
+library(viridis)
+library(patchwork)
+
+source("code/ggheatmap.custom.R")
+
+main_theme_final <- theme_bw() +
+  theme(aspect.ratio = 1,
+        axis.text.x = element_text(colour = "black", size = 7, face = "italic",
+                                   vjust = 1, hjust = 1),
+        axis.text.y = element_text(colour = "black", size = 7, face = "italic"),
+        axis.title = element_text(colour = "black", size = 9),
+        panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.title = element_text(colour = "black", size = 9, hjust = 0.5),
+        legend.key.size = unit(0.3, "cm"),
+        legend.text = element_text(colour = "black", size = 7, face = "italic"),
+        strip.background = element_blank(),
+        strip.text = element_text(margin = margin(0.05, 0, 0.05, 0, "cm"), size = 7),
+        title = element_text(colour = "black", size = 9))
+```
+
+# 2 -- Helper functions
+
+```{r helper-functions}
+compute.ROC <- function(observed, predicted, pred_name) {
+  df_roc_AUC <- data.frame(
+    threshold = sort(unique(predicted)),
+    pred_name = pred_name,
+    precision = NA,
+    TPR       = NA,
+    FPR       = NA,
+    F1_score  = NA
+  )
+
+  for (n in 1:nrow(df_roc_AUC)) {
+    threshold <- df_roc_AUC[n, 1]
+    temp_pred <- predicted > threshold
+
+    TP <- sum(observed & temp_pred)
+    TN <- sum(!(observed | temp_pred))
+    FP <- sum(!observed & temp_pred)
+    FN <- sum(observed & !temp_pred)
+
+    precision <- TP / (TP + FP)
+    TPR       <- TP / (TP + FN)
+    FPR       <- FP / (FP + TN)
+
+    df_roc_AUC[n, "precision"] <- precision
+    df_roc_AUC[n, "TPR"]       <- TPR
+    df_roc_AUC[n, "FPR"]       <- FPR
+    df_roc_AUC[n, "F1_score"]  <- 2 * (precision * TPR) / (precision + TPR)
+  }
+  return(df_roc_AUC)
+}
+```
+
+# 3 -- Load data & best models
+
+```{r load-data}
+covariate_standa_df <- read.table("outputs/data_for_models/covariate_standa_df.txt",
+                                  stringsAsFactors = TRUE)
+Y_genus    <- read.table("outputs/data_for_models/Y_genus.txt")
+genus_tree <- ape::read.tree("outputs/data_for_models/genus_tree.tree")
+
+genus_rename <- genus_tree$tip.label %>%
+  str_remove("g__") %>%
+  str_replace_all("[a-z]__", "Unk. ") %>%
+  str_replace("_(\\d+)$", " (\\1 OTU)") %>%
+  str_replace("_", " ")
+
+genus_tree$tip.label <- genus_rename
+
+Y_genus <- Y_genus %>%
+  rename_with(. %>%
+                str_remove("g__") %>%
+                str_replace_all("[a-z]__", "Unk. ") %>%
+                str_replace("_(\\d+)$", " (\\1 OTU)") %>%
+                str_replace("_", " "))
+
+Y_genus <- Y_genus[, genus_tree$tip.label]
+```
+
+```{r load-models}
+# Gaussian (abundance) models
+load(file = "outputs/models/list_mods_genus_gauss_phylo_autocorr.RData")
+load("outputs/models/WAIC_gauss_mod.txt")
+
+best_gauss_name <- WAIC_gauss_mod %>%
+  slice_min(WAIC_vecor, n = 1) %>%
+  pull(model_names)
+m_best_gauss <- list_mods[[best_gauss_name]]$m_converg
+
+cat("Best Gaussian model:", best_gauss_name, "\n")
+
+# Probit (occurrence) models
+load(file = "outputs/models/list_mods_bin_phylo_autocorr_genus.RData")
+read.table("outputs/models/WAIC_bin_mod.txt") -> WAIC_bin_mod
+WAIC_bin_mod %>% 
+  arrange(WAIC_vecor_bin)
+best_bin_name <- WAIC_bin_mod %>%
+  slice_min(WAIC_vecor_bin, n = 1) %>%
+  pull(model_names_bin)
+m_best_bin <- list_mods_bin[[best_bin_name]]$m_converg
+
+cat("Best occurrence model:", best_bin_name, "\n")
+
+# Second best probit model
+second_bin_name <- WAIC_bin_mod %>%
+  arrange(WAIC_vecor_bin) %>%
+  slice(2) %>%
+  pull(model_names_bin)
+m_second_bin <- list_mods_bin[[second_bin_name]]$m_converg
+
+cat("Second best occurrence model:", second_bin_name, "\n")
+rm(list_mods)
+```
+
+# 4 -- Cross-validation
+
+```{r cv-params}
+nfolds  <- 10
+nChains <- m_best_gauss$postList %>% length
+thin    <- 1
+ 
+```
+
+## 4.1 Gaussian model
+
+```{r cv-gauss}
+save_path_gauss <- "outputs/models/cv_gauss_best_waic.RData"
+
+if (file.exists(save_path_gauss)) {
+  load(save_path_gauss)
+} else {
+  set.seed(42)
+  partition_gauss <- createPartition(m_best_gauss, nfolds = nfolds, column = "sample")
+
+  pred_power_gauss <- computePredictedValues(
+    m_best_gauss, partition = partition_gauss,
+    thin = thin, nParallel = nChains
+  )
+
+  MF_pred_gauss <- evaluateModelFit(hM = m_best_gauss, predY = pred_power_gauss)
+
+  mPredY_gauss <- apply(
+    abind::abind(pred_power_gauss, along = 3), c(1, 2), mean, na.rm = TRUE
+  )
+  colnames(mPredY_gauss) <- colnames(m_best_gauss$Y)
+  rownames(mPredY_gauss) <- rownames(m_best_gauss$Y)
+
+  save(pred_power_gauss, MF_pred_gauss, mPredY_gauss, partition_gauss,
+       file = save_path_gauss)
+}
+```
+
+## 4.2 Occurrence model
+
+```{r cv-bin}
+save_path_bin <- "outputs/models/cv_bin_best_waic.RData"
+
+if (file.exists(save_path_bin)) {
+  load(save_path_bin)
+} else {
+  set.seed(42)
+  partition_bin <- createPartition(m_best_bin, nfolds = nfolds, column = "sample")
+
+  pred_power_bin <- computePredictedValues(
+    m_best_bin, partition = partition_bin,
+    thin = thin, nParallel = nChains
+  )
+
+  MF_pred_bin <- evaluateModelFit(hM = m_best_bin, predY = pred_power_bin)
+
+  mPredY_bin <- apply(
+    abind::abind(pred_power_bin, along = 3), c(1, 2), mean, na.rm = TRUE
+  )
+  colnames(mPredY_bin) <- colnames(m_best_bin$Y)
+  rownames(mPredY_bin) <- rownames(m_best_bin$Y)
+
+  save(pred_power_bin, MF_pred_bin, mPredY_bin, partition_bin,
+       file = save_path_bin)
+}
+```
+
+## 4.3 Occurrence model (second best)
+
+```{r cv-bin-second}
+save_path_bin2 <- "outputs/models/cv_bin_second_best_waic.RData"
+
+if (file.exists(save_path_bin2)) {
+  load(save_path_bin2)
+} else {
+  set.seed(42)
+  partition_bin2 <- createPartition(m_second_bin, nfolds = nfolds, column = "sample")
+
+  pred_power_bin2 <- computePredictedValues(
+    m_second_bin, partition = partition_bin2,
+    thin = thin, nParallel = nChains
+  )
+
+  MF_pred_bin2 <- evaluateModelFit(hM = m_second_bin, predY = pred_power_bin2)
+
+  mPredY_bin2 <- apply(
+    abind::abind(pred_power_bin2, along = 3), c(1, 2), mean, na.rm = TRUE
+  )
+  colnames(mPredY_bin2) <- colnames(m_second_bin$Y)
+  rownames(mPredY_bin2) <- rownames(m_second_bin$Y)
+
+  save(pred_power_bin2, MF_pred_bin2, mPredY_bin2, partition_bin2,
+       file = save_path_bin2)
+}
+```
+
+# 5 -- Gaussian model: RMSE per genus
+
+```{r gauss-rmse-data}
+# Predicted vs observed long table
+mPredY_gauss %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code, names_to = "genus", values_to = "pred") -> pred_gauss_long
+
+m_best_gauss$Y %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code, names_to = "genus", values_to = "obs") -> obs_gauss_long
+
+cv_gauss_df <- pred_gauss_long %>%
+  left_join(obs_gauss_long, by = c("Sample_code", "genus"))
+
+# RMSE per genus
+rmse_gauss_df <- cv_gauss_df %>%
+  group_by(genus) %>%
+  summarise(
+    RMSE      = sqrt(mean((pred - obs)^2, na.rm = TRUE)),
+    mean_obs  = mean(obs, na.rm = TRUE),
+    sd_obs    = sd(obs, na.rm = TRUE),
+    .groups   = "drop"
+  ) %>%
+  mutate(rel_RMSE = RMSE / sd_obs) %>%
+  arrange(RMSE)
+
+rmse_gauss_df %>%
+  knitr::kable(digits = 2, caption = "RMSE per genus (Gaussian model, CV)")
+```
+
+```{r gauss-rmse-plot, echo=FALSE, fig.height=8, fig.width=7}
+rmse_gauss_df %>%
+  mutate(genus = fct_reorder(genus, RMSE)) %>%
+  ggplot(aes(x = RMSE, y = genus)) +
+  geom_point(size = 2.5, color = "#E53935") +
+  geom_segment(aes(xend = 0, yend = genus), color = "#E53935", linewidth = 0.4) +
+  labs(x = "RMSE (cross-validated)",
+       y = NULL,
+       title = paste("Predictive power -", best_gauss_name),
+       subtitle = paste(nfolds, "fold CV")) +
+  main_theme_final +
+  theme(axis.text.y = element_text(size = 6)) -> rmse_plot
+
+ggsave(plot = rmse_plot,
+       filename = "figures/genus_gauss_autocorr/rmse_cv_gauss_best_waic.pdf",
+       units = "cm", height = 18, width = 14)
+
+rmse_plot
+```
+
+```{r gauss-obs-vs-pred, echo=FALSE, fig.height=10, fig.width=10}
+cv_gauss_df %>%
+  mutate(genus = factor(genus, levels = rmse_gauss_df$genus)) %>%
+  ggplot(aes(obs, pred)) +
+  facet_wrap(~genus) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  geom_abline(slope = 1, linetype = "dashed", color = "grey50") +
+  labs(x = "Observed abundance (log)", y = "Predicted abundance (log)",
+       title = paste("Observed vs predicted -", best_gauss_name)) +
+  main_theme_final +
+  theme(strip.text = element_text(size = 5)) -> obs_pred_gauss_plot
+
+ggsave(plot = obs_pred_gauss_plot,
+       filename = "figures/genus_gauss_autocorr/obs_vs_pred_cv_gauss_best_waic.pdf",
+       units = "cm", height = 24, width = 24)
+
+obs_pred_gauss_plot
+```
+
+# 6 -- Occurrence model: AUC-ROC per genus
+
+```{r bin-auc-data}
+# AUC from evaluateModelFit
+auc_bin_df <- data.frame(
+  genus = colnames(m_best_bin$Y),
+  AUC   = MF_pred_bin$AUC
+)
+
+auc_bin_df %>%
+  arrange(desc(AUC)) %>%
+  knitr::kable(digits = 3, caption = "AUC per genus (occurrence model, CV)")
+```
+```{r}
+mean(auc_bin_df$AUC, na.rm = T)
+```
+
+```{r bin-auc-plot, echo=FALSE, fig.height=8, fig.width=7}
+auc_bin_df %>%
+  filter(!is.na(AUC)) %>%
+  mutate(genus = fct_reorder(genus, AUC)) %>%
+  ggplot(aes(x = AUC, y = genus)) +
+  geom_point(size = 2.5, color = "#2196F3") +
+  geom_segment(aes(xend = 0.5, yend = genus), color = "#2196F3", linewidth = 0.4) +
+  geom_vline(xintercept = 0.5, linetype = "dashed", color = "grey60") +
+  scale_x_continuous(limits = c(0, 1)) +
+  labs(x = "AUC (cross-validated)",
+       y = NULL,
+       title = paste("Predictive power -", best_bin_name),
+       subtitle = paste(nfolds, "fold CV")) +
+  main_theme_final +
+  theme(axis.text.y = element_text(size = 6)) -> auc_plot
+
+ggsave(plot = auc_plot,
+       filename = "figures/genus_bin_autocorr/auc_cv_bin_best_waic.pdf",
+       units = "cm", height = 18, width = 14)
+
+auc_plot
+```
+
+## 6.1 ROC curves per genus
+
+```{r bin-roc-curves, echo=FALSE, fig.height=10, fig.width=10}
+# Exclude genera with no variation (all present or all absent)
+genus_with_variation <- colnames(m_best_bin$Y)[
+  colSums(m_best_bin$Y) > 0 & colSums(m_best_bin$Y) < nrow(m_best_bin$Y)
+]
+
+1:ncol(m_best_bin$Y) %>%
+  purrr::keep(~ colnames(m_best_bin$Y)[.x] %in% genus_with_variation) %>%
+  purrr::map(~ compute.ROC(
+    observed  = m_best_bin$Y[, .x],
+    predicted = mPredY_bin[, .x],
+    pred_name = colnames(m_best_bin$Y)[.x]
+  )) %>%
+  bind_rows() -> ROC_df
+
+# Best balanced threshold per genus (max TPR - FPR)
+ROC_df %>%
+  mutate(balanced_score = TPR - FPR) %>%
+  group_by(pred_name) %>%
+  filter(balanced_score == max(balanced_score, na.rm = TRUE)) %>%
+  filter(TPR == max(TPR, na.rm = TRUE)) %>%
+  dplyr::select(pred_name, threshold, balanced_score, TPR, FPR) %>%
+  rename(TPR_b = "TPR", FPR_b = "FPR") %>%
+  distinct() -> balanced_score_df
+
+ROC_df %>%
+  left_join(balanced_score_df %>%
+              rename(threshold_B = "threshold"),
+            by = "pred_name") %>%
+  arrange(threshold) %>%
+  ggplot() +
+  facet_wrap(~pred_name) +
+  geom_path(aes(x = FPR, y = TPR), linewidth = 0.8) +
+  geom_vline(aes(xintercept = FPR_b), col = "blue", linetype = 2, linewidth = 0.6) +
+  geom_hline(aes(yintercept = TPR_b), col = "blue", linetype = 2, linewidth = 0.6) +
+  geom_text(aes(x = 0.7, y = 0.1,
+                label = paste("thr =", round(threshold_B, 2))),
+            col = "blue", size = 1.5) +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1.01), expand = FALSE) +
+  geom_abline(linetype = "dashed") +
+  labs(x = "False Positive Rate\n(False presence predicted / all true absence)",
+       y = "True Positive Rate\n(True presence predicted / all true presence)",
+       title = paste("ROC curves -", best_bin_name)) +
+  main_theme_final -> ROC_curve_plot
+
+ggsave(plot = ROC_curve_plot,
+       filename = "figures/genus_bin_autocorr/ROC_curves_bin_best_waic.pdf",
+       units = "cm", height = 24, width = 24)
+
+ROC_curve_plot
+```
+
+## 6.2 Observed vs predicted occurrence
+
+```{r bin-obs-vs-pred, echo=FALSE, fig.height=10, fig.width=10}
+mPredY_bin %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code, names_to = "genus", values_to = "pred") -> pred_bin_long
+
+m_best_bin$Y %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code, names_to = "genus", values_to = "obs") -> obs_bin_long
+
+cv_bin_df <- pred_bin_long %>%
+  left_join(obs_bin_long, by = c("Sample_code", "genus"))
+
+cv_bin_df %>%
+  ggplot(aes(x = pred, y = obs)) +
+  facet_wrap(~genus) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"),
+              se = FALSE, linewidth = 0.5, color = "#2196F3") +
+  labs(x = "Predicted occurrence probability", y = "Observed (0/1)",
+       title = paste("Observed vs predicted -", best_bin_name)) +
+  main_theme_final +
+  theme(strip.text = element_text(size = 5)) -> obs_pred_bin_plot
+
+ggsave(plot = obs_pred_bin_plot,
+       filename = "figures/genus_bin_autocorr/obs_vs_pred_cv_bin_best_waic.pdf",
+       units = "cm", height = 24, width = 24)
+
+obs_pred_bin_plot
+```
+
+# 7 -- Second best occurrence model: AUC-ROC per genus
+
+```{r bin2-auc-data}
+auc_bin2_df <- data.frame(
+  genus = colnames(m_second_bin$Y),
+  AUC   = MF_pred_bin2$AUC
+)
+
+auc_bin2_df %>%
+  arrange(desc(AUC)) %>%
+  knitr::kable(digits = 3, caption = "AUC per genus (2nd best occurrence model, CV)")
+```
+```{r}
+mean(auc_bin2_df$AUC, na.rm = T)
+```
+
+```{r bin2-auc-plot, echo=FALSE, fig.height=8, fig.width=7}
+auc_bin2_df %>%
+  filter(!is.na(AUC)) %>%
+  mutate(genus = fct_reorder(genus, AUC)) %>%
+  ggplot(aes(x = AUC, y = genus)) +
+  geom_point(size = 2.5, color = "#FF9800") +
+  geom_segment(aes(xend = 0.5, yend = genus), color = "#FF9800", linewidth = 0.4) +
+  geom_vline(xintercept = 0.5, linetype = "dashed", color = "grey60") +
+  scale_x_continuous(limits = c(0, 1)) +
+  labs(x = "AUC (cross-validated)",
+       y = NULL,
+       title = paste("Predictive power -", second_bin_name),
+       subtitle = paste(nfolds, "fold CV")) +
+  main_theme_final +
+  theme(axis.text.y = element_text(size = 6)) -> auc_plot2
+
+ggsave(plot = auc_plot2,
+       filename = "figures/genus_bin_autocorr/auc_cv_bin_second_best_waic.pdf",
+       units = "cm", height = 18, width = 14)
+
+auc_plot2
+```
+
+## 7.1 ROC curves per genus (second best)
+
+```{r bin2-roc-curves, echo=FALSE, fig.height=10, fig.width=10}
+genus_with_variation2 <- colnames(m_second_bin$Y)[
+  colSums(m_second_bin$Y) > 0 & colSums(m_second_bin$Y) < nrow(m_second_bin$Y)
+]
+
+1:ncol(m_second_bin$Y) %>%
+  purrr::keep(~ colnames(m_second_bin$Y)[.x] %in% genus_with_variation2) %>%
+  purrr::map(~ compute.ROC(
+    observed  = m_second_bin$Y[, .x],
+    predicted = mPredY_bin2[, .x],
+    pred_name = colnames(m_second_bin$Y)[.x]
+  )) %>%
+  bind_rows() -> ROC_df2
+
+ROC_df2 %>%
+  mutate(balanced_score = TPR - FPR) %>%
+  group_by(pred_name) %>%
+  filter(balanced_score == max(balanced_score, na.rm = TRUE)) %>%
+  filter(TPR == max(TPR, na.rm = TRUE)) %>%
+  dplyr::select(pred_name, threshold, balanced_score, TPR, FPR) %>%
+  rename(TPR_b = "TPR", FPR_b = "FPR") %>%
+  distinct() -> balanced_score_df2
+
+ROC_df2 %>%
+  left_join(balanced_score_df2 %>%
+              rename(threshold_B = "threshold"),
+            by = "pred_name") %>%
+  arrange(threshold) %>%
+  ggplot() +
+  facet_wrap(~pred_name) +
+  geom_path(aes(x = FPR, y = TPR), linewidth = 0.8) +
+  geom_vline(aes(xintercept = FPR_b), col = "blue", linetype = 2, linewidth = 0.6) +
+  geom_hline(aes(yintercept = TPR_b), col = "blue", linetype = 2, linewidth = 0.6) +
+  geom_text(aes(x = 0.7, y = 0.1,
+                label = paste("thr =", round(threshold_B, 2))),
+            col = "blue", size = 1.5) +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1.01), expand = FALSE) +
+  geom_abline(linetype = "dashed") +
+  labs(x = "False Positive Rate\n(False presence predicted / all true absence)",
+       y = "True Positive Rate\n(True presence predicted / all true presence)",
+       title = paste("ROC curves -", second_bin_name)) +
+  main_theme_final -> ROC_curve_plot2
+
+ggsave(plot = ROC_curve_plot2,
+       filename = "figures/genus_bin_autocorr/ROC_curves_bin_second_best_waic.pdf",
+       units = "cm", height = 24, width = 24)
+
+ROC_curve_plot2
+```
+
+## 7.2 Comparison: best vs second best occurrence model
+
+```{r bin-comparison, echo=FALSE, fig.height=8, fig.width=10}
+bind_rows(
+  auc_bin_df %>% mutate(model = best_bin_name),
+  auc_bin2_df %>% mutate(model = second_bin_name)
+) %>%
+  filter(!is.na(AUC)) %>%
+  mutate(genus = fct_reorder(genus, AUC, .fun = max)) %>%
+  ggplot(aes(x = AUC, y = genus, color = model)) +
+  geom_point(size = 2.5, position = position_dodge(width = 0.5)) +
+  geom_vline(xintercept = 0.5, linetype = "dashed", color = "grey60") +
+  scale_x_continuous(limits = c(0, 1)) +
+  scale_color_manual(values = c("#2196F3", "#FF9800")) +
+  labs(x = "AUC (cross-validated)",
+       y = NULL,
+       color = "Model",
+       title = "AUC comparison: best vs second best occurrence model",
+       subtitle = paste(nfolds, "fold CV")) +
+  main_theme_final +
+  theme(axis.text.y = element_text(size = 6),
+        legend.position = "bottom") -> auc_comparison_plot
+
+ggsave(plot = auc_comparison_plot,
+       filename = "figures/genus_bin_autocorr/auc_comparison_best_vs_second.pdf",
+       units = "cm", height = 18, width = 16)
+
+auc_comparison_plot
+```
+
+# 8 -- Session info
+
+```{r session-info}
+cat("Best Gaussian model:", best_gauss_name, "\n")
+cat("Best occurrence model:", best_bin_name, "\n")
+cat("2nd best occurrence model:", second_bin_name, "\n")
+cat("CV folds:", nfolds, "\n")
+sessionInfo()
+```
