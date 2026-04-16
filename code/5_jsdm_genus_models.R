@@ -5,8 +5,8 @@ library(ape)
 
 
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-test_run = F # For test, take few minutes
-# test_run = F # True run, need 2 day to compute on 10 physical core with a frequency of approximately 4.6 GHz 
+# test_run = T # For test, take few minutes
+test_run = F # True run, need 2 day to compute on 10 physical core with a frequency of approximately 4.6 GHz
 if(test_run){
   nfolds = 2
   nChains = 2
@@ -58,125 +58,47 @@ covariate_standa_df[temp,c("lon", "lat")] <- covariate_standa_df[temp,c("lon", "
 xy <- covariate_standa_df[,c("lon", "lat", "Sample_code")] %>%
   remove_rownames() %>%
   column_to_rownames("Sample_code")
-studyDesign <- data.frame(sample = rownames(Y_genus), stringsAsFactors = TRUE)
-rL <- HmscRandomLevel(sData = xy, longlat = T)
+studyDesign <- data.frame(
+  sample    = as.factor(rownames(Y_genus)),
+  sample_id = as.factor(rownames(Y_genus))
+)
+rL_spatial <- HmscRandomLevel(sData = xy, longlat = TRUE)
+rL_iid     <- HmscRandomLevel(units = studyDesign$sample_id)
 
 library(GGally)
 covariate_standa_df %>% 
   select(-c(lon, lat, tmin, Sample_code)) %>%
   GGally::ggpairs()
 ## ----echo=FALSE---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-mod_pois_null <- Hmsc(
-  Y = log(Y_genus_trunc),
-  XData =  covariate_standa_df,
-  XFormula = ~ 1,
-  #phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "normal",
-  YScale = T
+# All 2^5 = 32 additive combinations of covariates (null through full), with phylogenetic tree
+covariates <- c("ndvi", "precip", "tmax", "tdelta", "wind")
+
+all_cov_sets <- c(
+  list(character(0)),
+  unlist(lapply(1:5, function(k) combn(covariates, k, simplify = FALSE)), recursive = FALSE)
 )
 
-mod_pois_ndvi <- Hmsc(
-  Y = log(Y_genus_trunc),
-  XData = covariate_standa_df,
-  XFormula = ~ ndvi,
-  # phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "normal",
-  YScale = T
-)
+make_gauss_name <- function(covs) {
+  if (length(covs) == 0) return("mod_pois_null")
+  if (length(covs) == 5) return("mod_pois_full")
+  paste0("mod_pois_", paste(covs, collapse = "_"))
+}
 
-
-mod_pois_precip <- Hmsc(
-  Y = log(Y_genus_trunc),
-  XData = covariate_standa_df,
-  XFormula = ~ precip,
-  # phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "normal",
-  YScale = T
-)
-
-mod_pois_tmax <- Hmsc(
-  Y = log(Y_genus_trunc),
-  XData =  covariate_standa_df,
-  XFormula = ~ tmax,
-  # phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "normal",
-  YScale = T
-)
-
-mod_pois_wind  <- Hmsc(
-  Y = log(Y_genus_trunc),
-  XData = covariate_standa_df,
-  XFormula = ~ wind,
-  # phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "normal",
-  YScale = T
-)
-
-mod_pois_three_precip <-  Hmsc(
-  Y = log(Y_genus_trunc),
-  XData = covariate_standa_df,
-  XFormula = ~ precip + tmax +tdelta,
-  # phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "normal",
-  YScale = T
-)
-
-mod_pois_three_ndvi <-  Hmsc(
-  Y = log(Y_genus_trunc),
-  XData = covariate_standa_df,
-  XFormula = ~ ndvi  + tmax +tdelta,
-  # phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "normal",
-  YScale = T
-)
-
-mod_pois_four <-  Hmsc(
-  Y = log(Y_genus_trunc),
-  XData = covariate_standa_df,
-  XFormula = ~ ndvi + precip + tmax +tdelta,
-  # phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "normal",
-  YScale = T
-)
-
-mod_pois_full <-  Hmsc(
-  Y = log(Y_genus_trunc),
-  XData = covariate_standa_df,
-  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
-  #phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "normal",
-  YScale = T
-)
-
-
-model_list <- list(
-  mod_pois_null = mod_pois_null,
-  mod_pois_ndvi      = mod_pois_ndvi,
-  mod_pois_precip    = mod_pois_precip,
-  mod_pois_tmax      = mod_pois_tmax,
-  mod_pois_wind      = mod_pois_wind,
-  mod_pois_three_precip = mod_pois_three_precip,
-  mod_pois_three_ndvi = mod_pois_three_ndvi,
-  mod_pois_four = mod_pois_four,
-  mod_pois_full = mod_pois_full
+model_list <- setNames(
+  lapply(all_cov_sets, function(covs) {
+    f <- if (length(covs) == 0) ~ 1 else {as.formula(paste("~", paste(covs, collapse = " + ")))}
+    Hmsc(
+      Y           = log(Y_genus_trunc),
+      XData       = covariate_standa_df,
+      XFormula    = f,
+      phyloTree   = genus_tree,
+      studyDesign = studyDesign,
+      ranLevels   = list(sample = rL_spatial, sample_id = rL_iid),
+      distr       = "normal",
+      YScale      = TRUE
+    )
+  }),
+  sapply(all_cov_sets, make_gauss_name)
 )
 
 
@@ -224,14 +146,16 @@ compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 10, samples = 2000,  te
 
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 model_list %>%
-  purrr::map(\(x) compute.hmsc(x, nfold = nfolds, nChains = nChains, samples = 2000,  test.run = test_run)
-    ) -> list_mods
+  purrr::imap(\(x, nm) {
+    cat(sprintf("\n[Gaussian %d/%d] %s\n", which(names(model_list) == nm), length(model_list), nm))
+    compute.hmsc(x, nfold = nfolds, nChains = nChains, samples = 2000, test.run = test_run)
+  }) -> list_mods
 list_mods$mod_pois_null$hmsc_mod$Y %>% str
-if(file.exists("outputs/models/list_mods_genus_pois_autocorr.RData")){
+if(file.exists("outputs/models/list_mods_genus_gauss_phylo_autocorr.RData")){
   # safe save in case a model list in already present in the folder
-  save(list_mods, file = "outputs/models/list_mods_genus_gauss_autocorr_safesave.RData")
+  save(list_mods, file = "outputs/models/list_mods_genus_gauss_phylo_autocorr_safesave.RData")
 }else{
-  save(list_mods, file = "outputs/models/list_mods_genus_gauss_autocorr.RData")
+  save(list_mods, file = "outputs/models/list_mods_genus_gauss_phylo_autocorr.RData")
 }
 
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -245,98 +169,27 @@ Y_genus_bin <- Y_genus %>%
 
 
 ## ----echo=FALSE---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-mod_bin_null <- Hmsc(
-  Y = Y_genus_bin,
-  XData =  covariate_standa_df ,
-  XFormula = ~ 1,
-  phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "probit"
-)
+# All 2^5 = 32 additive combinations of covariates (null through full), with phylogenetic tree
+make_bin_name <- function(covs) {
+  if (length(covs) == 0) return("mod_bin_null")
+  if (length(covs) == 5) return("mod_bin_full")
+  paste0("mod_bin_", paste(covs, collapse = "_"))
+}
 
-mod_bin_ndvi <- Hmsc(
-  Y = Y_genus_bin,
-  XData = covariate_standa_df,
-  XFormula = ~ ndvi,
-  phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "probit"
-)
-
-
-mod_bin_precip <- Hmsc(
-  Y = Y_genus_bin,
-  XData = covariate_standa_df,
-  XFormula = ~ precip,
-  phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "probit"
-)
-
-mod_bin_tmax <- Hmsc(
-  Y = Y_genus_bin,
-  XData =  covariate_standa_df,
-  XFormula = ~ tmax,
-  phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "probit"
-)
-
-mod_bin_wind  <- Hmsc(
-  Y = Y_genus_bin,
-  XData = covariate_standa_df,
-  XFormula = ~ wind,
-  phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "probit"
-)
-
-mod_bin_full <- Hmsc(
-  Y = Y_genus_bin,
-  XData = covariate_standa_df,
-  XFormula = ~ ndvi + precip + tmax +tdelta + wind,
-  phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "probit"
-)
-
-mod_bin_interaction <- Hmsc(
-  Y = Y_genus_bin,
-  XData = covariate_standa_df,
-  XFormula = ~ (ndvi + precip + tmax +tdelta + wind)^2,
-  phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "probit"
-)
-
-mod_bin_poly <- Hmsc(
-  Y = Y_genus_bin,
-  XData = covariate_standa_df,
-  XFormula = ~poly(ndvi,2) + poly(precip,2) + poly(tmax,2) + poly(tdelta,2) + poly(wind,2),
-  phyloTree = genus_tree,
-  studyDesign = studyDesign,
-  ranLevels = list(sample = rL),
-  distr = "probit"
-)
-
-
-
-model_bin_list <- list(
-  mod_bin_null      = mod_bin_null,
-  mod_bin_ndvi      = mod_bin_ndvi,
-  mod_bin_precip    = mod_bin_precip,
-  mod_bin_tmax      = mod_bin_tmax,
-  mod_bin_wind      = mod_bin_wind,
-  mod_bin_full      = mod_bin_full,
-  mod_bin_interaction = mod_bin_interaction,
-  mod_bin_poly      = mod_bin_poly
+model_bin_list <- setNames(
+  lapply(all_cov_sets, function(covs) {
+    f <- if (length(covs) == 0) ~ 1 else {as.formula(paste("~", paste(covs, collapse = " + ")))}
+    Hmsc(
+      Y           = Y_genus_bin,
+      XData       = covariate_standa_df,
+      XFormula    = f,
+      phyloTree   = genus_tree,
+      studyDesign = studyDesign,
+      ranLevels   = list(sample = rL_spatial, sample_id = rL_iid),
+      distr       = "probit"
+    )
+  }),
+  sapply(all_cov_sets, make_bin_name)
 )
 
 
@@ -344,14 +197,16 @@ model_bin_list <- list(
 
 
 model_bin_list %>%
-  purrr::map(\(x) compute.hmsc(x, nfold = nfolds, nChains = nChains, samples = 1000, test.run = test_run)
-             )-> list_mods_bin
+  purrr::imap(\(x, nm) {
+    cat(sprintf("\n[Probit %d/%d] %s\n", which(names(model_bin_list) == nm), length(model_bin_list), nm))
+    compute.hmsc(x, nfold = nfolds, nChains = nChains, samples = 1000, test.run = test_run)
+  }) -> list_mods_bin
 
-if(file.exists("outputs/models/list_mods_bin_autocorr_genus.RData")){
+if(file.exists("outputs/models/list_mods_bin_phylo_autocorr_genus.RData")){
   # safe save in case a model list in already present in the folder
-  save(list_mods_bin, file = "outputs/models/list_mods_bin__autocorr_genus_safesave.RData")
+  save(list_mods_bin, file = "outputs/models/list_mods_bin_phylo_autocorr_genus_safesave.RData")
 }else{
-  save(list_mods_bin, file = "outputs/models/list_mods_bin_autocorr_genus.RData")
+  save(list_mods_bin, file = "outputs/models/list_mods_bin_phylo_autocorr_genus.RData")
 }
 
 
