@@ -1,0 +1,1244 @@
+---
+title: "8 - JSDM results (Gaussian & Probit)"
+output: html_document
+date: "2026-04-16"
+editor_options:
+  chunk_output_type: inline
+---
+
+This script analyses the best Gaussian (log-abundance) and second-best probit
+(occurrence) JSDMs selected by WAIC from the 32 additive covariate combinations
+fitted in `5_jsdm_genus_models.R`. The occurrence model is the second-best by
+WAIC, which showed better cross-validated AUC than the best WAIC model
+(see `7_cross_validation_best_models.Rmd`).
+
+# 1 -- Packages & themes
+
+```{r packages, include=FALSE}
+library(tidyverse)
+library(raster)
+library(pals)
+library(viridis)
+library(Hmsc)
+library(ape)
+library(ggtree)
+library(nlme)
+library(ggspatial)
+library(patchwork)
+library(corrplot)
+library(sf)
+library(magrittr)
+library(cowplot)
+library(ggplotify)
+library(ggnewscale)
+
+source("code/ggheatmap.custom.R")
+
+main_theme <- theme_minimal() +
+  theme(aspect.ratio = 1,
+        axis.text.x = element_text(colour = "black", size = 13, face = "italic",
+                                   angle = 45, vjust = 1, hjust = 1),
+        axis.text.y = element_text(colour = "black", size = 13, face = "italic"),
+        axis.title = element_text(colour = "black", size = 12),
+        panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+        legend.title = element_text(colour = "black", size = 12, hjust = 0.5),
+        legend.text = element_text(colour = "black", size = 13))
+
+main_theme_final <- theme_bw() +
+  theme(aspect.ratio = 1,
+        axis.text.x = element_text(colour = "black", size = 7, face = "italic",
+                                   vjust = 1, hjust = 1),
+        axis.text.y = element_text(colour = "black", size = 7, face = "italic"),
+        axis.title = element_text(colour = "black", size = 9),
+        panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.title = element_text(colour = "black", size = 9, hjust = 0.5),
+        legend.key.size = unit(0.3, "cm"),
+        legend.text = element_text(colour = "black", size = 7, face = "italic"),
+        strip.background = element_blank(),
+        strip.text = element_text(margin = margin(0.05, 0, 0.05, 0, "cm"), size = 7),
+        title = element_text(colour = "black", size = 9))
+```
+
+# 2 -- Load data & models
+
+```{r load-data}
+covariate_standa_df <- read.table("outputs/data_for_models/covariate_standa_df.txt",
+                                  stringsAsFactors = TRUE)
+Y_genus   <- read.table("outputs/data_for_models/Y_genus.txt")
+genus_tree <- ape::read.tree("outputs/data_for_models/genus_tree.tree")
+```
+
+# 3 -- Rename genus
+
+```{r rename-genus}
+genus_rename <- genus_tree$tip.label %>%
+  str_remove("g__") %>%
+  str_replace_all("[a-z]__", "Unk. ") %>%
+  str_replace("_(\\d+)$", " (\\1 OTU)") %>%
+  str_replace("_", " ")
+
+genus_tree$tip.label <- genus_rename
+
+Y_genus <- Y_genus %>%
+  rename_with(. %>%
+                str_remove("g__") %>%
+                str_replace_all("[a-z]__", "Unk. ") %>%
+                str_replace("_(\\d+)$", " (\\1 OTU)") %>%
+                str_replace("_", " "))
+
+Y_genus <- Y_genus[, genus_tree$tip.label]
+```
+
+```{r load-models}
+# Gaussian (abundance) models
+load(file = "outputs/models/list_mods_genus_gauss_phylo_autocorr.RData")
+
+# Probit (occurrence) models
+load(file = "outputs/models/list_mods_bin_phylo_autocorr_genus.RData")
+```
+
+# 4 -- Select best models by WAIC
+
+## 4.1 Gaussian: best WAIC
+
+```{r select-best-gauss}
+load("outputs/models/WAIC_gauss_mod.txt")
+
+WAIC_gauss_mod %>%
+  arrange(WAIC_vecor) %>%
+  knitr::kable(caption = "All Gaussian models ranked by WAIC (lower is better)")
+
+best_gauss_name <- WAIC_gauss_mod %>%
+  slice_min(WAIC_vecor, n = 1) %>%
+  pull(model_names)
+
+cat("Best Gaussian model:", best_gauss_name, "\n")
+cat("WAIC:", WAIC_gauss_mod %>%
+      slice_min(WAIC_vecor, n = 1) %>%
+      pull(WAIC_vecor), "\n")
+```
+
+```{r extract-gauss-model}
+m_best_gauss <- list_mods[[best_gauss_name]]$m_converg
+rm(list_mods)
+```
+
+## 4.2 Probit: second-best WAIC
+
+The second-best WAIC model is used because it showed better cross-validated
+AUC than the best WAIC model (see `7_cross_validation_best_models.Rmd`).
+
+```{r select-best-bin}
+WAIC_bin_mod <- read.table("outputs/models/WAIC_bin_mod.txt")
+
+WAIC_bin_mod %>%
+  arrange(WAIC_vecor_bin) %>%
+  knitr::kable(caption = "All occurrence models ranked by WAIC (lower is better)")
+
+best_bin_names <- WAIC_bin_mod %>%
+  arrange(WAIC_vecor_bin) %>%
+  slice(1:2) %>%
+  pull(model_names_bin)
+
+cat("Best occurrence model (not used):", best_bin_names[1], "\n")
+cat("Second-best occurrence model (used):", best_bin_names[2], "\n")
+```
+
+```{r extract-bin-model}
+m_best_bin <- list_mods_bin[[best_bin_names[2]]]$m_converg
+rm(list_mods_bin)
+```
+
+# 5 -- Convergence diagnostics
+
+## 5.1 Gaussian model
+
+```{r convergence-gauss}
+postBeta_gauss <- getPostEstimate(m_best_gauss, parName = "Beta")
+mpost_gauss    <- convertToCodaObject(m_best_gauss)
+
+gelman_diag_gauss <- gelman.diag(mpost_gauss$Beta, multivariate = FALSE)
+hist(gelman_diag_gauss$psrf[, 1], breaks = 50,
+     main = paste("Gelman-Rubin PSRF - Gaussian", best_gauss_name),
+     xlab = "PSRF (should be < 1.1)")
+
+ess_gauss <- effectiveSize(mpost_gauss$Beta)
+hist(ess_gauss, breaks = 50,
+     main = paste("Effective sample size - Gaussian", best_gauss_name),
+     xlab = "Effective sample size")
+
+cat("\n--- Rho convergence (Gaussian) ---\n")
+gelman.diag(mpost_gauss$Rho, multivariate = FALSE)
+summary(mpost_gauss$Rho)
+```
+
+## 5.2 Probit model
+
+```{r convergence-bin}
+postBeta_bin <- getPostEstimate(m_best_bin, parName = "Beta")
+mpost_bin    <- convertToCodaObject(m_best_bin)
+
+gelman_diag_bin <- gelman.diag(mpost_bin$Beta, multivariate = FALSE)
+hist(gelman_diag_bin$psrf[, 1], breaks = 50,
+     main = paste("Gelman-Rubin PSRF - Probit", best_bin_names[2]),
+     xlab = "PSRF (should be < 1.1)")
+
+ess_bin <- effectiveSize(mpost_bin$Beta)
+hist(ess_bin, breaks = 50,
+     main = paste("Effective sample size - Probit", best_bin_names[2]),
+     xlab = "Effective sample size")
+
+cat("\n--- Rho convergence (Probit) ---\n")
+gelman.diag(mpost_bin$Rho, multivariate = FALSE)
+summary(mpost_bin$Rho)
+```
+
+# 6 -- Beta heatmap on phylogenetic tree
+
+Helper to build beta heatmap matrix from a model:
+
+```{r beta-heatmap-helper}
+build_beta_matrix <- function(model, genus_tree) {
+  postBeta <- getPostEstimate(model, parName = "Beta")
+  beta_results <- postBeta$mean
+  rownames(beta_results) <- colnames(model$X)
+  colnames(beta_results) <- str_replace(colnames(beta_results), "Unknown ", "Unk. ")
+  colnames(beta_results) <- str_replace(colnames(beta_results), "_", " ")
+
+  # Mask non-significant effects (95% posterior support)
+  beta_results[!(postBeta$support > 0.95 | postBeta$support < 0.05)] <- NA
+
+  # Reorder to match phylogenetic tree
+  beta_results <- t(beta_results)[genus_tree$tip.label, colnames(model$X)]
+
+  # Rename covariates for display
+  covariate_labels <- c("(Intercept)" = "Intercept",
+                        "ndvi"        = "NDVI",
+                        "precip"      = "Precip.",
+                        "tmax"        = "T\u00b0 max",
+                        "tdelta"      = "T\u00b0 delta",
+                        "wind"        = "Wind spd")
+  existing_cols <- colnames(beta_results)
+  new_col_names <- covariate_labels[existing_cols]
+  new_col_names[is.na(new_col_names)] <- existing_cols[is.na(new_col_names)]
+  colnames(beta_results) <- new_col_names
+
+  beta_results
+}
+
+build_effect_plot <- function(beta_results, genus_tree, title = NULL) {
+
+  p <- ggtree(genus_tree, layout = "roundrect") +
+    geom_tiplab(align = TRUE, size = 3) +
+    theme_tree()
+
+  out <- ggheatmap.custom(p = p, data = beta_results, offset = 1, width = 1,
+                          font.size = 5, colnames_angle = -60, hjust = 0) +
+    scale_fill_gradient2(low = "#366785", mid = "white", high = "#c85200",
+                         na.value = "grey90",
+                         limits = c(min(beta_results, na.rm = TRUE),
+                                    max(beta_results, na.rm = TRUE))) +
+    scale_y_continuous(expand = c(0, 5)) +
+    labs(fill = "Parameters\nvalues") +
+    main_theme_final +
+    theme_void()
+
+  if (!is.null(title)) {
+    out <- out + ggtitle(title) +
+      theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 14))
+  }
+  out
+}
+```
+
+## 6.1 Gaussian effect plot
+
+```{r beta-heatmap-gauss, echo=FALSE, fig.height=8, fig.width=9}
+beta_gauss <- build_beta_matrix(m_best_gauss, genus_tree)
+beta_gauss %>%
+  as.data.frame() %>%
+  rownames_to_column("genus") %>%
+  mutate(genus = str_replace(genus, "OTU", "ASV")) %>%
+  column_to_rownames("genus") %>%
+  as.matrix()-> beta_gauss
+  
+genus_tree_plot <- genus_tree 
+genus_tree_plot$tip.label <- str_replace(genus_tree_plot$tip.label, "OTU", "ASV")
+  
+effect_plot_gauss <- build_effect_plot(beta_gauss, genus_tree_plot,
+                                       title = "Abundance model")
+
+ggsave(plot = effect_plot_gauss,
+       filename = "figures/genus_gauss_autocorr/effect_plot_gauss_best_waic.pdf",
+       units = "cm", height = 18, width = 20)
+
+effect_plot_gauss
+```
+
+## 6.2 Probit effect plot
+
+```{r beta-heatmap-bin, echo=FALSE, fig.height=8, fig.width=9}
+beta_bin <- build_beta_matrix(m_best_bin, genus_tree)
+beta_bin %>%
+  as.data.frame() %>%
+  rownames_to_column("genus") %>%
+  mutate(genus = str_replace(genus, "OTU", "ASV")) %>%
+  column_to_rownames("genus") %>%
+  as.matrix()-> beta_bin
+
+effect_plot_bin <- build_effect_plot(beta_bin, genus_tree,
+                                     title = "Occurrence model")
+
+ggsave(plot = effect_plot_bin,
+       filename = "figures/genus_bin_autocorr/effect_plot_bin_best_waic.pdf",
+       units = "cm", height = 18, width = 20)
+
+effect_plot_bin
+```
+
+## 6.3 Combined effect plot (abundance + occurrence)
+
+Replicates the layout of `effect_plot_merged.svg`: a **single** phylogenetic
+tree on the left with two heatmap panels appended to its right — occurrence
+(probit) first, then abundance (Gaussian) — each with its own colour palette.
+
+The two heatmaps are stacked onto the same `ggtree` via consecutive calls to
+`ggheatmap.custom`, with `ggnewscale::new_scale_fill()` inserted between them
+so each panel keeps an independent fill scale. The Gaussian heatmap is offset
+horizontally past the probit heatmap using the tree's x-range.
+
+```{r effect-plot-merged, echo=FALSE, fig.height=7, fig.width=8}
+p_tree <- ggtree(genus_tree_plot, layout = "roundrect") +
+  geom_tiplab(align = TRUE, size = 3) +
+  theme_tree()
+
+max_tree_x <- max(p_tree$data$x, na.rm = TRUE)
+tree_range <- diff(range(p_tree$data$x, na.rm = TRUE))
+n_tips     <- length(genus_tree_plot$tip.label)
+
+offset_bin   <- 0.65                             # gap tree -> panel 1
+panel_gap    <- 0.1                             # panels flush (reference)
+offset_gauss <- offset_bin + tree_range + panel_gap
+
+# --- Probit (occurrence) heatmap: purple/white/green scale ---
+# (matches reference: negative = purple/mauve, positive = green)
+p_with_bin <- ggheatmap.custom(
+  p = p_tree, data = beta_bin, offset = offset_bin, width = 1,
+  font.size = 4, colnames_angle = -60, hjust = 0,
+  legend_title = "Occurrence\nparameter"
+) +
+  scale_fill_gradient2(
+    low = "#762a83", mid = "white", high = "#1b7837",
+    na.value = "grey90",
+    limits = c(min(beta_bin, na.rm = TRUE),
+               max(beta_bin, na.rm = TRUE)),
+    name = "Occurrence\nparameter"
+  ) +
+  ggnewscale::new_scale_fill()
+
+# --- Gaussian (abundance) heatmap: blue/white/orange scale ---
+# (matches reference: negative = blue, positive = orange)
+effect_plot_merged <- ggheatmap.custom(
+  p = p_with_bin, data = beta_gauss, offset = offset_gauss, width = 1,
+  font.size = 4, colnames_angle = -60, hjust = 0,
+  legend_title = "Abundance\nparameter"
+) +
+  scale_fill_gradient2(
+    low = "#366785", mid = "white", high = "#c85200",
+    na.value = "grey90",
+    limits = c(min(beta_gauss, na.rm = TRUE),
+               max(beta_gauss, na.rm = TRUE)),
+    name = "Abundance\nparameter"
+  ) +
+  # Panel titles centred above each heatmap block (Arial bold ~14pt = size 5)
+  annotate("text",
+           x = max_tree_x + offset_bin + tree_range / 2,
+           y = n_tips + 1.5,
+           label = "Occurence model",
+           size = 5, fontface = "bold") +
+  annotate("text",
+           x = max_tree_x + offset_gauss + tree_range / 2,
+           y = n_tips + 1.5,
+           label = "Abundance model",
+           size = 5, fontface = "bold") +
+  scale_y_continuous(expand = expansion(add = c(0.5, 2.5))) +
+  # Allow the angled column labels and tip labels to draw outside the panel
+  # (prevents the x-axis labels from being clipped regardless of figure size)
+  coord_cartesian(clip = "off") +
+  theme_void() +
+  theme(
+    legend.position = "right",
+    legend.title    = element_text(size = 9, hjust = 0.5),
+    legend.text     = element_text(size = 7),
+    legend.key.size = unit(0.3, "cm"),
+    # Generous margins so labels extending past the panel remain visible:
+    # bottom margin for angled column labels, right for the last column label
+    plot.margin     = margin(t = 10, r = 30, b = 35, l = 10, unit = "pt")
+  )
+
+ggsave(plot = effect_plot_merged,
+       filename = "figures/figures_manuscript/effect_plot_merged.pdf",
+       units = "cm", height = 18, width = 28)
+
+effect_plot_merged
+```
+
+# 7 -- Phylogenetic signal (Pagel's lambda) -- combined
+
+```{r pagel-lambda-compute, include=FALSE}
+compute.pagel.lambda <- function(model, model_label) {
+  postBeta  <- getPostEstimate(model, parName = "Beta")
+  phyloTree <- model$phyloTree
+  nc <- dim(postBeta$mean)[1]
+
+  results <- data.frame(
+    lambda    = numeric(nc),
+    p_value   = numeric(nc),
+    model     = character(nc),
+    covariate = character(nc),
+    stringsAsFactors = FALSE
+  )
+
+  control <- glsControl(opt = "optim", msVerbose = FALSE)
+
+  for (j in 1:nc) {
+    y  <- postBeta$mean[j, ]
+    m1 <- gls(y ~ 1)
+    m2 <- tryCatch(
+      gls(y ~ 1,
+          correlation = corPagel(0.5, phyloTree, fixed = FALSE,
+                                 form = ~names(y)),
+          control = control),
+      error = function(e) NULL
+    )
+
+    if (!is.null(m2)) {
+      z1 <- summary(m2)
+      z2 <- anova(m1, m2)
+      results$lambda[j]  <- z1$modelStruct[1]$corStruct
+      results$p_value[j] <- z2$`p-value`[2]
+    } else {
+      results$lambda[j]  <- NA
+      results$p_value[j] <- NA
+    }
+    results$model[j]     <- model_label
+    results$covariate[j] <- colnames(model$X)[j]
+  }
+  results
+}
+
+lambda_df <- bind_rows(
+  compute.pagel.lambda(m_best_gauss, "Abundance"),
+  compute.pagel.lambda(m_best_bin,   "Occurrence")
+)
+```
+
+```{r pagel-lambda-table, echo=FALSE}
+lambda_df %>%
+  knitr::kable(caption = "Pagel's lambda for each covariate (both models)")
+```
+
+```{r pagel-lambda-plot, echo=FALSE, fig.height=6, fig.width=7}
+lambda_df %>%
+  mutate(covariate = case_when(
+    covariate == "(Intercept)" ~ "Intercept",
+    covariate == "ndvi"        ~ "NDVI",
+    covariate == "precip"      ~ "Precip.",
+    covariate == "tmax"        ~ "T\u00b0 max",
+    covariate == "tdelta"      ~ "T\u00b0 delta",
+    covariate == "wind"        ~ "Wind spd",
+    .default = covariate
+  )) %>%
+  ggplot() +
+  geom_point(aes(lambda, covariate, fill = model, alpha = p_value <= 0.05),
+             cex = 4, shape = 21) +
+  geom_vline(xintercept = 1, linetype = 2) +
+  scale_fill_viridis(discrete = TRUE) +
+  labs(x = "Phylogenetic structure of responses",
+       y = "Covariates", fill = "Models", alpha = "p <= 0.05") +
+  theme_classic() +
+  theme(aspect.ratio = 1,
+        axis.text.x  = element_text(colour = "black", size = 11, face = "italic",
+                                    angle = 18, vjust = 1, hjust = 1),
+        axis.text.y  = element_text(colour = "black", size = 11, face = "italic"),
+        axis.title   = element_text(colour = "black", size = 14),
+        panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+        legend.title = element_text(colour = "black", size = 14, hjust = 0.5),
+        legend.text  = element_text(colour = "black", size = 11)) -> phylo_signal_combined
+
+ggsave(plot = phylo_signal_combined,
+       filename = "figures/figures_manuscript/phylogenetic_signal_combined.pdf",
+       units = "cm", height = 16, width = 16)
+
+phylo_signal_combined
+```
+
+# 8 -- Variance partitioning
+
+## 8.1 Gaussian
+```{r}
+VP_gauss <- computeVariancePartitioning(m_best_gauss, na.ignore = TRUE)
+
+# 1. Enhanced Colorblind Palette (Okabe-Ito refined)
+color_palette <- c(
+  "Biomass quantity index" = "#E69F00", # Orange
+  "Precipitation"          = "#56B4E9", # Sky Blue
+  "T° max"                 = "#009E73", # Bluish Green
+  "T° delta"               = "#F0E442", # Yellow
+  "Wind"                   = "#0072B2", # Blue
+  "Spatial"                = "#D55E00", # Vermillion (More professional than bright red)
+  "Unexplain"              = "#D3D3D3"  # Light Grey (To recede into background)
+)
+
+# 2. Data Processing: Sorting by explained variance
+plot_data_vp_gauss <- VP_gauss$vals %>%
+  as.data.frame() %>%
+  rownames_to_column("var") %>%
+  # [Logic to clean var names remains the same as your snippet]
+  mutate(var = case_when(
+    var == "ndvi"   ~ "Biomass quantity index",
+    var == "precip" ~ "Precipitation",
+    var == "tmax"   ~ "T° max",
+    var == "tdelta" ~ "T° delta",
+    var == "wind"   ~ "Wind",
+    var == "Random: sample"    ~ "Spatial",
+    var == "Random: sample_id" ~ "Unexplain",
+    .default = var
+  )) %>%
+  pivot_longer(-var) %>%
+  mutate(name = str_replace(name, "_", " "),
+         name = str_replace(name, "Unknown ", "Unk. "))
+
+# Calculate total explained variance to sort the Y-axis
+order_by_explained <- plot_data_vp_gauss %>%
+  filter(var != "Unexplain") %>%
+  group_by(name) %>%
+  summarize(total_exp = sum(value)) %>%
+  arrange(total_exp) %>%
+  pull(name)
+
+plot_data_vp_gauss$name <- factor(plot_data_vp_gauss$name, levels = order_by_explained)
+plot_data_vp_gauss$var <- factor(plot_data_vp_gauss$var, 
+                                 levels = c("Unexplain", "Spatial", "Wind", "T° delta", "T° max", "Precipitation", "Biomass quantity index"))
+
+# 3. Final Plot
+ggplot(plot_data_vp_gauss, aes(x = value, y = name, fill = var)) +
+  # Use a slight border to separate colors clearly
+  geom_col(color = "white", linewidth = 0.1) +
+  scale_fill_manual(values = color_palette, breaks = rev(names(color_palette))) +
+  scale_x_continuous(expand = c(0, 0), labels = scales::percent_format(), breaks = seq(0, 1, 0.25)) +
+  labs(x = "Proportion of Variance Explained",
+       y = NULL,
+       fill = "Environmental\nCovariates") +
+  theme_minimal(base_family = "sans") +
+  theme(
+    # Clean up gridlines
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(color = "grey92"),
+    # Text styling
+    axis.text.y = element_text(size = 8, face = "italic", color = "grey20"),
+    axis.text.x = element_text(size = 10, color = "black"),
+    axis.title.x = element_text(size = 12, face = "bold", margin = margin(t = 12)),
+    # Legend aesthetics
+    legend.position = "top",
+    legend.justification = "left",
+    legend.title = element_text(size = 10, face = "bold"),
+    legend.text = element_text(size = 9),
+    plot.margin = margin(20, 20, 20, 20),
+    aspect.ratio = 1
+  ) +
+  guides(fill = guide_legend(reverse = TRUE, nrow = 2)) -> vp_gauss
+
+ggsave(plot = vp_gauss,
+        filename = "figures/figures_manuscript/variance_partitioning_gauss_best_waic.pdf",
+        units = "cm", height = 16, width = 16)
+vp_gauss
+```
+
+## 8.2 Probit
+
+```{r vp-bin, echo=FALSE, warning=FALSE, fig.height=8, fig.width=8}
+VP_bin <- computeVariancePartitioning(m_best_bin, na.ignore = TRUE)
+
+plot_data_vp_bin <- VP_bin$vals %>%
+  as.data.frame() %>%
+  rownames_to_column("var") %>%
+  mutate(var = case_when(
+    var == "ndvi"   ~ "Biomass quantity index",
+    var == "precip" ~ "Precipitation",
+    var == "tmax"   ~ "T\u00b0 max",
+    var == "tdelta" ~ "T\u00b0 delta",
+    var == "wind"   ~ "Wind",
+    var == "Random: sample"   ~ "Spatial",
+    var == "Random: sample_id"   ~ "Unexplain",
+    .default = var
+  ),
+  var = factor(var, levels = rev(c("Biomass quantity index", "Precipitation",
+                                   "T\u00b0 max", "T\u00b0 delta", "Wind",
+                                   "Spatial", "Unexplain")))) %>%
+  pivot_longer(-var) %>%
+  mutate(name = str_replace(name, "_", " "),
+         name = str_replace(name, "Unknown ", "Unk. "))
+
+# Calculate total explained variance to sort the Y-axis
+order_by_explained_bin <- plot_data_vp_bin %>%
+  filter(var != "Unexplain") %>%
+  group_by(name) %>%
+  summarize(total_exp = sum(value)) %>%
+  arrange(total_exp) %>%
+  pull(name)
+
+plot_data_vp_bin$name <- factor(plot_data_vp_bin$name, levels = order_by_explained_bin)
+plot_data_vp_bin$var <- factor(plot_data_vp_bin$var, 
+                                 levels = c("Unexplain", "Spatial", "Wind", "T° delta", "T° max", "Precipitation", "Biomass quantity index"))
+
+# 3. Final Plot
+ggplot(plot_data_vp_bin, aes(x = value, y = name, fill = var)) +
+  # Use a slight border to separate colors clearly
+  geom_col(color = "white", linewidth = 0.1) +
+  scale_fill_manual(values = color_palette, breaks = rev(names(color_palette))) +
+  scale_x_continuous(expand = c(0, 0), labels = scales::percent_format(), breaks = seq(0, 1, 0.25)) +
+  labs(x = "Proportion of Variance Explained",
+       y = NULL,
+       fill = "Environmental\nCovariates") +
+  theme_minimal(base_family = "sans") +
+  theme(
+    # Clean up gridlines
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(color = "grey92"),
+    # Text styling
+    axis.text.y = element_text(size = 8, face = "italic", color = "grey20"),
+    axis.text.x = element_text(size = 10, color = "black"),
+    axis.title.x = element_text(size = 12, face = "bold", margin = margin(t = 12)),
+    # Legend aesthetics
+    legend.position = "top",
+    legend.justification = "left",
+    legend.title = element_text(size = 10, face = "bold"),
+    legend.text = element_text(size = 9),
+    plot.margin = margin(20, 20, 20, 20),
+    aspect.ratio = 1
+  ) +
+  guides(fill = guide_legend(reverse = TRUE, nrow = 2)) -> vp_bin
+
+ggsave(plot = vp_bin,
+        filename = "figures/figures_manuscript/variance_partitioning_bin_second_best_waic.pdf",
+        units = "cm", height = 16, width = 16)
+vp_bin
+```
+
+# 9 -- Residual associations (Omega)
+
+Correlation between each genus when all the environmental variables have been
+accounted for. These figures show unexplained correlations caused by omitted
+biotic or abiotic variables.
+
+## 9.1 Gaussian
+
+```{r residual-gauss, echo=FALSE, fig.height=8, fig.width=8}
+OmegaCor_gauss <- computeAssociations(m_best_gauss)
+supportLevel   <- 0.95
+
+for (i in seq_along(OmegaCor_gauss)) {
+  toPlot <- ((OmegaCor_gauss[[i]]$support > supportLevel) +
+               (OmegaCor_gauss[[i]]$support < (1 - supportLevel)) > 0) * OmegaCor_gauss[[i]]$mean
+
+  corrplot(toPlot, method = "color",
+           col = colorRampPalette(c("blue", "white", "red"))(200),
+           tl.cex = 0.6, tl.col = "black",
+           title = paste("Gaussian residual associations -", m_best_gauss$rLNames[i]),
+           mar = c(0, 0, 1, 0), order = "hclust")
+}
+```
+
+## 9.2 Probit
+
+```{r residual-bin, echo=FALSE, fig.height=8, fig.width=8}
+OmegaCor_bin <- computeAssociations(m_best_bin)
+
+for (i in seq_along(OmegaCor_bin)) {
+  toPlot <- ((OmegaCor_bin[[i]]$support > supportLevel) +
+               (OmegaCor_bin[[i]]$support < (1 - supportLevel)) > 0) * OmegaCor_bin[[i]]$mean
+
+  corrplot(toPlot, method = "color",
+           col = colorRampPalette(c("blue", "white", "red"))(200),
+           tl.cex = 0.6, tl.col = "black",
+           title = paste("Probit residual associations -", m_best_bin$rLNames[i]),
+           mar = c(0, 0, 1, 0), order = "hclust")
+}
+```
+
+# 10 -- Taxonomy reference
+
+```{r taxonomy, message=FALSE}
+data_18S <- "data/18S_AMf_Eukaryome/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.table2"
+amf_taxonomic_levels_eucaryome <- c("kingdom", "phylum", "class", "order",
+                                    "family", "genus", "species")
+
+taxomony_AMF_genuslevel <- data_18S %>%
+  read_tsv() %>%
+  dplyr::select(taxonomy) %>%
+  mutate(taxonomy = str_replace_all(taxonomy, ":", "_"),
+         taxonomy = str_replace_all(taxonomy, "[|]", "; ")) %>%
+  filter(str_detect(taxonomy, "p__Glomeromycota")) %>%
+  mutate(taxonomy = str_replace_all(taxonomy,
+           "(p__|c__|o__|f__|g__|s__)unclassified", "*")) %>%
+  separate_wider_delim(taxonomy, names = amf_taxonomic_levels_eucaryome,
+                       delim = "; ", cols_remove = FALSE) %>%
+  unite(taxonomy, kingdom, phylum, class, order, family, genus,
+        sep = "; ", remove = FALSE) %>%
+  group_by(taxonomy) %>%
+  mutate(
+    genus = paste(str_extract(
+      taxonomy,
+      "(g_[^;*]+$)|([a-z]_[^;*]+)(?=(;\\s*\\*|\\s*\\*|$))"),
+      n(), sep = "_")
+  ) %>%
+  group_by(genus) %>%
+  summarise(kingdom = first(kingdom),
+            phylum  = first(phylum),
+            class   = first(class),
+            order   = first(order),
+            family  = first(family)) %>%
+  mutate(genus = genus %>%
+           str_remove("g__") %>%
+           str_replace_all("[a-z]__", "Unk. ") %>%
+           str_replace("_(\\d+)$", " (\\1 ASV)"))
+```
+
+# 11 -- Spatial prediction maps (limited gradient)
+
+## 11.1 Prepare raster covariates
+
+```{r prepare-rasters, echo=FALSE}
+ndvi_uganda              <- raster("outputs/raster/ndvi_uganda_lower_res.tif")
+precip_uganda_resampled  <- raster("outputs/raster/precip_2023_lower_res.tif")
+tmax_uganda_resampled    <- raster("outputs/raster/tmax_2023_lower_res.tif")
+tmin_uganda_resampled    <- raster("outputs/raster/tmin_2023_lower_res.tif")
+delta_t_uganda           <- tmax_uganda_resampled - tmin_uganda_resampled
+wind_2023                <- raster("outputs/raster/wind_2023.tif")
+
+ndvi_raster_df <- rasterToPoints(ndvi_uganda) %>%
+  as.data.frame() %>% rename(ndvi = "ndvi_uganda_lower_res")
+
+precip_raster_df <- rasterToPoints(precip_uganda_resampled) %>%
+  as.data.frame() %>% rename(precip = "precip_2023_lower_res")
+
+tmax_raster_df <- rasterToPoints(tmax_uganda_resampled) %>%
+  as.data.frame() %>% rename(tmax = "tmax_2023_lower_res")
+
+tdelta_raster_df <- rasterToPoints(delta_t_uganda) %>%
+  as.data.frame() %>% rename(tdelta = "layer")
+
+wind_raster_df <- rasterToPoints(wind_2023) %>%
+  as.data.frame() %>% rename(wind = "wind_2023")
+
+data_spatial_df <- ndvi_raster_df %>%
+  left_join(precip_raster_df, by = c("x", "y")) %>%
+  left_join(tmax_raster_df,   by = c("x", "y")) %>%
+  left_join(tdelta_raster_df, by = c("x", "y")) %>%
+  left_join(wind_raster_df,   by = c("x", "y")) %>%
+  na.omit() %>%
+  mutate(across(c(ndvi, precip, tmax, tdelta, wind),
+                ~ vegan::decostand(.x, method = "standardize")[, 1]))
+```
+
+```{r environmental-maps, echo=FALSE, fig.height=8, fig.width=14}
+data_spatial_df %>%
+  pivot_longer(-c(x, y)) %>%
+  mutate(name = case_when(
+    name == "ndvi"   ~ "Biomass quantity index",
+    name == "precip" ~ "Precipitation",
+    name == "tmax"   ~ "T\u00b0 max",
+    name == "tdelta" ~ "T\u00b0 delta",
+    name == "wind"   ~ "Wind"),
+    name = factor(name, levels = c("Biomass quantity index", "Precipitation",
+                                   "T\u00b0 max", "T\u00b0 delta", "Wind"))) %>%
+  ggplot() +
+  facet_wrap(~name) +
+  geom_raster(aes(x, y, fill = value)) +
+  scale_fill_viridis(option = "viridis") +
+  labs(x = "Longitude", y = "Latitude",
+       fill = "Environmental\nstandardized values") +
+  main_theme_final -> environmental_maps
+
+ggsave(plot = environmental_maps,
+       filename = "figures/figures_manuscript/environmental_maps.pdf",
+       units = "cm", width = 33, height = 20)
+
+environmental_maps
+```
+
+## 11.2 Limited environmental gradient
+
+```{r limited-gradient}
+ug_border <- read_sf("data/ug_shp/ug.shp")
+
+data_spatial_limited_df <- data_spatial_df %>%
+  filter(
+    max(covariate_standa_df$ndvi)   > ndvi   & min(covariate_standa_df$ndvi)   < ndvi,
+    max(covariate_standa_df$precip) > precip & min(covariate_standa_df$precip) < precip,
+    max(covariate_standa_df$tmax)   > tmax   & min(covariate_standa_df$tmax)   < tmax,
+    max(covariate_standa_df$tdelta) > tdelta & min(covariate_standa_df$tdelta) < tdelta,
+    max(covariate_standa_df$wind)   > wind   & min(covariate_standa_df$wind)   < wind
+  )
+
+xy.grid_limited <- data_spatial_limited_df %>%
+  dplyr::select(x, y) %>%
+  as.matrix()
+
+XData.grid_limited <- data_spatial_limited_df %>%
+  dplyr::select(-c(x, y))
+```
+
+## 11.3 Gaussian abundance prediction
+
+```{r abundance-prediction, echo=FALSE}
+model_covariates_gauss <- setdiff(colnames(m_best_gauss$X), "(Intercept)")
+XData_gauss <- XData.grid_limited[, model_covariates_gauss, drop = FALSE]
+
+save_path_gauss <- "outputs/models/abundance_prediction_gauss_best_waic.RData"
+
+if (file.exists(save_path_gauss)) {
+  load(save_path_gauss)
+} else {
+  Gradient_gauss <- prepareGradient(
+    m_best_gauss,
+    XDataNew = XData_gauss,
+    sDataNew = list(sample = xy.grid_limited))
+
+  predY_gauss <- stats::predict(m_best_gauss, Gradient = Gradient_gauss,
+                                predictEtaMean = TRUE)
+
+  EpredY_map_limited <- predY_gauss[[1]]
+  if (length(predY_gauss) > 1) {
+    for (i in 2:length(predY_gauss)) {
+      EpredY_map_limited <- EpredY_map_limited + predY_gauss[[i]]
+      if (i %% 1000 == 0) print(i)
+    }
+    EpredY_map_limited <- EpredY_map_limited / length(predY_gauss)
+  }
+  save(EpredY_map_limited, file = save_path_gauss)
+}
+```
+
+```{r abundance-map-data}
+colnames(EpredY_map_limited) <- colnames(EpredY_map_limited) %>%
+  str_replace("Unknown ", "Unk. ") %>%
+  str_replace("_", " ")
+
+data_spatial_limited_df %>%
+  bind_cols(as.data.frame(EpredY_map_limited)) %>%
+  mutate(pixel_ID = as.factor(1:n())) %>%
+  pivot_longer(-c(pixel_ID, x, y, ndvi, precip, tmax, tdelta, wind),
+               values_to = "abundance", names_to = "genus") %>%
+  left_join(taxomony_AMF_genuslevel, by = "genus") %>%
+  mutate(genus = str_replace(genus, "Unknown ", "Unk. "),
+         genus = str_replace(genus, "_", " ")) -> EpredY_abundance_df_limited
+```
+
+## 11.4 Probit occurrence prediction
+
+```{r occurrence-prediction, echo=FALSE}
+model_covariates_bin <- setdiff(colnames(m_best_bin$X), "(Intercept)")
+XData_bin <- XData.grid_limited[, model_covariates_bin, drop = FALSE]
+
+save_path_bin <- "outputs/models/occurrence_prediction_bin_best_waic.RData"
+
+if (file.exists(save_path_bin)) {
+  load(save_path_bin)
+} else {
+  Gradient_bin <- prepareGradient(
+    m_best_bin,
+    XDataNew = XData_bin,
+    sDataNew = list(sample = xy.grid_limited))
+
+  predY_bin <- stats::predict(m_best_bin, Gradient = Gradient_bin,
+                              predictEtaMean = TRUE, expected = TRUE)
+
+  EpredY_map_limited <- predY_bin[[1]]
+  if (length(predY_bin) > 1) {
+    for (i in 2:length(predY_bin)) {
+      EpredY_map_limited <- EpredY_map_limited + predY_bin[[i]]
+      if (i %% 1000 == 0) print(i)
+    }
+    EpredY_map_limited <- EpredY_map_limited / length(predY_bin)
+  }
+  save(EpredY_map_limited, file = save_path_bin)
+}
+```
+
+```{r compute-thresholds}
+# Load cross-validation predictions for the second best binary model
+load("outputs/models/cv_bin_second_best_waic.RData")
+
+compute.ROC <- function(observed, predicted, pred_name) {
+  df_roc_AUC <- data.frame(
+    threshold = sort(unique(predicted)),
+    pred_name = pred_name,
+    precision = NA, TPR = NA, FPR = NA, F1_score = NA
+  )
+  for (n in 1:nrow(df_roc_AUC)) {
+    th <- df_roc_AUC[n, 1]
+    temp_pred <- predicted > th
+    TP <- sum(observed & temp_pred)
+    TN <- sum(!(observed | temp_pred))
+    FP <- sum(!observed & temp_pred)
+    FN <- sum(observed & !temp_pred)
+    precision <- TP / (TP + FP)
+    TPR <- TP / (TP + FN)
+    FPR <- FP / (FP + TN)
+    df_roc_AUC[n, "precision"] <- precision
+    df_roc_AUC[n, "TPR"]       <- TPR
+    df_roc_AUC[n, "FPR"]       <- FPR
+    df_roc_AUC[n, "F1_score"]  <- 2 * (precision * TPR) / (precision + TPR)
+  }
+  return(df_roc_AUC)
+}
+
+1:ncol(m_best_bin$Y) %>%
+  purrr::map(~ compute.ROC(
+    observed  = m_best_bin$Y[, .x],
+    predicted = mPredY_bin2[, .x],
+    pred_name = colnames(m_best_bin$Y)[.x]
+  )) %>%
+  bind_rows() -> ROC_df
+
+# Best balanced threshold per genus (max Youden's J = TPR - FPR)
+ROC_df %>%
+  mutate(balanced_score = TPR - FPR) %>%
+  group_by(pred_name) %>%
+  filter(balanced_score == max(balanced_score, na.rm = FALSE)) %>%
+  filter(TPR == max(TPR, na.rm = TRUE)) %>%
+  dplyr::select(pred_name, threshold, balanced_score, TPR, FPR) %>%
+  rename(TPR_b = "TPR", FPR_b = "FPR") %>%
+  distinct() %>%
+  # Manually set threshold for genera that are always present
+  rbind(., data.frame(pred_name = c("Acaulospora (88 ASV)",
+                                    "Unk. Glomeraceae (120 ASV)"),
+                      threshold = 0, balanced_score = NA,
+                      TPR_b = NA, FPR_b = NA)) %>%
+  mutate(threshold = case_when(pred_name %in% c("Nanoglomus (128 ASV)",
+                                                "Sclerocystis (52 ASV)") ~ 0,
+                               .default = threshold),
+         TPR_b = case_when(pred_name %in% c("Nanoglomus (128 ASV)",
+                                            "Sclerocystis (52 ASV)") ~ NA,
+                           .default = TPR_b),
+         FPR_b = case_when(pred_name %in% c("Nanoglomus (128 ASV)",
+                                            "Sclerocystis (52 ASV)") ~ NA,
+                           .default = FPR_b)) -> balanced_score_df
+```
+
+```{r occurrence-map-data}
+colnames(EpredY_map_limited) <- colnames(EpredY_map_limited) %>%
+  str_replace("Unknown ", "Unk. ") %>%
+  str_replace("_", " ")
+
+balanced_score_df <- balanced_score_df %>%
+  mutate(pred_name = str_replace(pred_name, "_", " "),
+         pred_name = str_replace(pred_name, "Unknown ", "Unk. "))
+
+EpredY_map_limited <- EpredY_map_limited[, balanced_score_df$pred_name]
+
+# Threshold probabilities to presence/absence
+EpredY_occurrence_map <- sweep(EpredY_map_limited, 2,
+                               balanced_score_df$threshold,
+                               FUN = function(x, th) x > th)
+EpredY_occurrence_map <- +EpredY_occurrence_map
+
+data_spatial_limited_df %>%
+  bind_cols(as.data.frame(EpredY_occurrence_map)) %>%
+  mutate(pixel_ID = as.factor(1:n())) %>%
+  pivot_longer(-c(pixel_ID, x, y, ndvi, precip, tmax, tdelta, wind),
+               values_to = "occurrence", names_to = "genus") %>%
+  mutate(occurrence = as.factor(occurrence)) %>%
+  left_join(taxomony_AMF_genuslevel, by = "genus") -> EpredY_occurrence_df_limited
+```
+
+# 12 -- Prediction maps
+
+## 12.1 All-genus abundance map (Gaussian)
+
+```{r abundance-map-all, echo=FALSE, fig.height=12, fig.width=12}
+EpredY_abundance_df_limited %>%
+  ggplot() +
+  facet_wrap(~genus) +
+  geom_raster(aes(x, y, fill = abundance)) +
+  scale_fill_viridis(option = "magma") +
+  labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)",
+       title = paste("Predicted abundance -", best_gauss_name)) +
+  main_theme_final -> map_abundance_all
+
+map_abundance_all
+```
+
+## 12.2 All-genus occurrence map (Probit)
+
+```{r occurrence-map-all, echo=FALSE, fig.height=12, fig.width=12}
+EpredY_occurrence_df_limited %>%
+  ggplot() +
+  facet_wrap(~genus) +
+  geom_raster(aes(x, y, fill = occurrence)) +
+  scale_fill_viridis(discrete = TRUE, option = "viridis", begin = 0.05, end = 0.6) +
+  labs(x = "Longitude", y = "Latitude", fill = "Occurrence",
+       title = paste("Predicted occurrence -", best_bin_names[2])) +
+  main_theme_final -> map_occurrence_all
+
+map_occurrence_all
+```
+
+## 12.3 Per-family abundance maps (Gaussian)
+
+### Glomeraceae
+
+```{r abundance-glomeraceae, echo=FALSE, fig.height=10, fig.width=10}
+EpredY_abundance_df_limited %>%
+  filter(family == "f__Glomeraceae") %>%
+  ggplot() +
+  geom_sf(data = ug_border, alpha = 0.4) +
+  facet_wrap(~genus) +
+  geom_tile(aes(x, y, fill = abundance)) +
+  scale_fill_viridis(option = "magma") +
+  labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)",
+       title = "Glomeraceae") +
+  main_theme_final -> abundance_Glomeraceae_map
+
+ggsave(plot = abundance_Glomeraceae_map,
+       filename = "figures/genus_gauss_autocorr/abundance_Glomeraceae_gauss_best_waic.pdf",
+       units = "cm", width = 48, height = 48)
+
+abundance_Glomeraceae_map
+```
+
+### Gigasporaceae
+
+```{r abundance-gigasporaceae, echo=FALSE, fig.height=5, fig.width=5}
+EpredY_abundance_df_limited %>%
+  filter(family == "f__Gigasporaceae") %>%
+  ggplot() +
+  geom_sf(data = ug_border, alpha = 0.4) +
+  facet_wrap(~genus) +
+  geom_tile(aes(x, y, fill = abundance)) +
+  scale_fill_viridis(option = "magma") +
+  labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)",
+       title = "Gigasporaceae") +
+  main_theme_final -> abundance_Gigasporaceae_map
+
+ggsave(plot = abundance_Gigasporaceae_map,
+       filename = "figures/genus_gauss_autocorr/abundance_Gigasporaceae_gauss_best_waic.pdf",
+       units = "cm", width = 12, height = 12)
+
+abundance_Gigasporaceae_map
+```
+
+### Acaulosporaceae
+
+```{r abundance-acaulosporaceae, echo=FALSE, fig.height=5, fig.width=5}
+EpredY_abundance_df_limited %>%
+  filter(family == "f__Acaulosporaceae") %>%
+  ggplot() +
+  geom_sf(data = ug_border, alpha = 0.4) +
+  facet_wrap(~genus) +
+  geom_tile(aes(x, y, fill = abundance)) +
+  scale_fill_viridis(option = "magma") +
+  labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)",
+       title = "Acaulosporaceae") +
+  main_theme_final -> abundance_Acaulosporaceae_map
+
+ggsave(plot = abundance_Acaulosporaceae_map,
+       filename = "figures/genus_gauss_autocorr/abundance_Acaulosporaceae_gauss_best_waic.pdf",
+       units = "cm", width = 12, height = 12)
+
+abundance_Acaulosporaceae_map
+```
+
+### Diversisporaceae
+
+```{r abundance-diversisporaceae, echo=FALSE, fig.height=12, fig.width=5}
+EpredY_abundance_df_limited %>%
+  filter(family == "f__Diversisporaceae") %>%
+  group_by(genus) %>%
+  mutate(max_abund = max(abundance)) %>%
+  ungroup() %>%
+  mutate(genus = fct_reorder(genus, -max_abund)) %>%
+  group_split(genus) %>%
+  purrr::map(~ {
+    ggplot() +
+      facet_wrap(~genus) +
+      geom_sf(data = ug_border, alpha = 0.4) +
+      geom_tile(data = .x, aes(x, y, fill = abundance)) +
+      scale_fill_viridis(option = "magma") +
+      labs(x = "Longitude", y = "Latitude", fill = "Abundance (log)") +
+      main_theme_final
+  }) %>%
+  wrap_plots(nrow = 3) -> abundance_Diversisporaceae_map
+
+ggsave(plot = abundance_Diversisporaceae_map,
+       filename = "figures/genus_gauss_autocorr/abundance_Diversisporaceae_gauss_best_waic.pdf",
+       units = "cm", width = 12, height = 36)
+
+abundance_Diversisporaceae_map
+```
+
+## 12.4 Per-family occurrence maps (Probit)
+
+### Glomeraceae
+
+```{r occurrence-glomeraceae, echo=FALSE, fig.height=10, fig.width=10}
+EpredY_occurrence_df_limited %>%
+  filter(family == "f__Glomeraceae") %>%
+  ggplot() +
+  geom_sf(data = ug_border, alpha = 0.4) +
+  facet_wrap(~genus) +
+  geom_tile(aes(x, y, fill = occurrence)) +
+  scale_fill_viridis(discrete = TRUE, option = "viridis", begin = 0.05, end = 0.6) +
+  labs(x = "Longitude", y = "Latitude", fill = "Occurrence",
+       title = "Glomeraceae") +
+  main_theme_final -> occurrence_Glomeraceae_map
+
+ggsave(plot = occurrence_Glomeraceae_map,
+       filename = "figures/genus_bin_autocorr/occurrence_Glomeraceae_bin_best_waic.pdf",
+       units = "cm", width = 48, height = 48)
+
+occurrence_Glomeraceae_map
+```
+
+### Gigasporaceae
+
+```{r occurrence-gigasporaceae, echo=FALSE, fig.height=5, fig.width=5}
+EpredY_occurrence_df_limited %>%
+  filter(family == "f__Gigasporaceae") %>%
+  ggplot() +
+  geom_sf(data = ug_border, alpha = 0.4) +
+  facet_wrap(~genus) +
+  geom_tile(aes(x, y, fill = occurrence)) +
+  scale_fill_viridis(discrete = TRUE, option = "viridis", begin = 0.05, end = 0.6) +
+  labs(x = "Longitude", y = "Latitude", fill = "Occurrence",
+       title = "Gigasporaceae") +
+  main_theme_final -> occurrence_Gigasporaceae_map
+
+ggsave(plot = occurrence_Gigasporaceae_map,
+       filename = "figures/genus_bin_autocorr/occurrence_Gigasporaceae_bin_best_waic.pdf",
+       units = "cm", width = 12, height = 12)
+
+occurrence_Gigasporaceae_map
+```
+
+### Acaulosporaceae
+
+```{r occurrence-acaulosporaceae, echo=FALSE, fig.height=5, fig.width=5}
+EpredY_occurrence_df_limited %>%
+  filter(family == "f__Acaulosporaceae") %>%
+  ggplot() +
+  geom_sf(data = ug_border, alpha = 0.4) +
+  facet_wrap(~genus) +
+  geom_tile(aes(x, y, fill = occurrence)) +
+  scale_fill_viridis(discrete = TRUE, option = "viridis", begin = 0.05, end = 0.6) +
+  labs(x = "Longitude", y = "Latitude", fill = "Occurrence",
+       title = "Acaulosporaceae") +
+  main_theme_final -> occurrence_Acaulosporaceae_map
+
+ggsave(plot = occurrence_Acaulosporaceae_map,
+       filename = "figures/genus_bin_autocorr/occurrence_Acaulosporaceae_bin_best_waic.pdf",
+       units = "cm", width = 12, height = 12)
+
+occurrence_Acaulosporaceae_map
+```
+
+### Diversisporaceae
+
+```{r occurrence-diversisporaceae, echo=FALSE, fig.height=12, fig.width=5}
+EpredY_occurrence_df_limited %>%
+  filter(family == "f__Diversisporaceae") %>%
+  group_split(genus) %>%
+  purrr::map(~ {
+    ggplot() +
+      facet_wrap(~genus) +
+      geom_sf(data = ug_border, alpha = 0.4) +
+      geom_tile(data = .x, aes(x, y, fill = occurrence)) +
+      scale_fill_viridis(discrete = TRUE, option = "viridis", begin = 0.05, end = 0.6) +
+      labs(x = "Longitude", y = "Latitude", fill = "Occurrence") +
+      main_theme_final
+  }) %>%
+  wrap_plots(nrow = 3) -> occurrence_Diversisporaceae_map
+
+ggsave(plot = occurrence_Diversisporaceae_map,
+       filename = "figures/genus_bin_autocorr/occurrence_Diversisporaceae_bin_best_waic.pdf",
+       units = "cm", width = 12, height = 36)
+
+occurrence_Diversisporaceae_map
+```
+
+# 13 -- Richness maps (limited gradient)
+
+```{r richness-maps, echo=FALSE, fig.height=6, fig.width=12}
+map_ug <- rnaturalearth::ne_states("Uganda", returnclass = "sf")
+
+# Gaussian richness (abundance > 0)
+EpredY_abundance_df_limited %>%
+  filter(!str_detect(genus, "Unk.")) %>%
+  mutate(present = abundance > 0) %>%
+  group_by(pixel_ID) %>%
+  summarise(richness = sum(present),
+            x = first(x),
+            y = first(y)) %>%
+  ggplot() +
+  geom_sf(data = map_ug, alpha = 0.4) +
+  geom_tile(aes(x, y, fill = richness), alpha = 0.9) +
+  annotation_north_arrow(
+    location = "tr", which_north = "true",
+    height = unit(1, "cm"), width = unit(1, "cm"),
+    style = north_arrow_minimal(
+      line_col = "black", fill = "black",
+      text_col = "black", line_width = 2, text_size = 10)) +
+  scale_fill_viridis(option = "magma") +
+  labs(x = "Longitude", y = "Latitude",
+       fill = "Known genus\nrichness (predicted)") +
+  main_theme_final -> map_richness_gauss
+
+ggsave(plot = map_richness_gauss,
+       filename = "figures/genus_gauss_autocorr/map_richness_gauss_best_waic.pdf",
+       units = "cm", width = 12, height = 12)
+
+# Probit richness (thresholded occurrence)
+EpredY_occurrence_df_limited %>%
+  filter(!str_detect(genus, "Unk.")) %>%
+  group_by(pixel_ID) %>%
+  summarise(richness = sum(as.numeric(as.character(occurrence))),
+            x = first(x),
+            y = first(y)) %>%
+  ggplot() +
+  geom_sf(data = map_ug, alpha = 0.4) +
+  geom_tile(aes(x, y, fill = richness), alpha = 0.9) +
+  annotation_north_arrow(
+    location = "tr", which_north = "true",
+    height = unit(1, "cm"), width = unit(1, "cm"),
+    style = north_arrow_minimal(
+      line_col = "black", fill = "black",
+      text_col = "black", line_width = 2, text_size = 10)) +
+  scale_fill_viridis(option = "magma") +
+  labs(x = "Longitude", y = "Latitude",
+       fill = "Predicted genus\nrichness") +
+  main_theme_final -> map_richness_bin
+
+ggsave(plot = map_richness_bin,
+       filename = "figures/genus_bin_autocorr/map_richness_bin_best_waic.pdf",
+       units = "cm", width = 12, height = 12)
+
+map_richness_gauss + map_richness_bin
+```
+
+# 14 -- Session info
+
+```{r session-info}
+cat("Gaussian model:", best_gauss_name, "\n")
+cat("Gaussian covariates:", paste(colnames(m_best_gauss$X), collapse = ", "), "\n")
+cat("Probit model:", best_bin_names[2], "\n")
+cat("Probit covariates:", paste(colnames(m_best_bin$X), collapse = ", "), "\n")
+cat("Number of species:", ncol(m_best_gauss$Y), "\n")
+cat("Number of sites:", nrow(m_best_gauss$Y), "\n")
+sessionInfo()
+```
