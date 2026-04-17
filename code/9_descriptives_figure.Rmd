@@ -265,4 +265,83 @@ ggsave(plot = tree_sum_read_plot, filename = "figures/genus/tree_sum_read_plot.p
 ```
 
 
+## Clean 3-panel manuscript figure: Tree | Log sum rarefied reads | Family
+
+```{r}
+sum_reads_genus_df %>% 
+  mutate(name =  str_replace(name, "OTU", "ASV")) -> sum_reads_genus_df
+# Data for the Family column (one row per tip, x = 0 so text is left-aligned)
+family_label_df <- sum_reads_genus_df %>%
+  dplyr::select(name, family) %>%
+  mutate(x = 0)
+
+# Base tree panel (reused from above but kept local for clarity)
+genus_tree_plot <- genus_tree
+genus_tree_plot$tip.label <- str_replace(genus_tree_plot$tip.label, "OTU", "ASV")
+p_tree_genus_clean <- ggtree(genus_tree_plot, layout = "roundrect") +
+  geom_tiplab(size = 3, align = TRUE, linesize = .5) +
+  theme_tree() +
+  xlim_tree(1.2)
+
+tree_sum_read_plot_clean <- p_tree_genus_clean +
+  # Panel 2: horizontal bar chart of log-sum rarefied reads, filled by family
+  geom_facet(
+    panel       = "Log sum rarefied reads\n(abundances)",
+    data        = sum_reads_genus_df,
+    geom        = geom_col,
+    mapping     = aes(x = sum_rarefied_reads_log, fill = family),
+    orientation = "y",
+    width       = .6
+  ) +
+  # Panel 3: family name column, colour-coded to match the bars
+  geom_facet(
+    panel   = "Family",
+    data    = family_label_df,
+    geom    = geom_text,
+    mapping = aes(x = x, label = family, colour = family),
+    hjust   = 0,
+    size    = 3
+  ) +
+  scale_fill_manual(values   = watlington()[c(3:7, 9:13, 8)]) +
+  scale_colour_manual(values = watlington()[c(3:7, 9:13, 8)]) +
+  # Force sensible x-ranges per panel (prevents the auto-reversed bar axis)
+  ggtree::xlim_expand(xlim = c(0, 10),
+                      panel = "Log sum rarefied reads\n(abundances)") +
+  ggtree::xlim_expand(xlim = c(0, 1), panel = "Family") +
+  theme_classic() +
+  theme(
+    legend.position  = "none",
+    plot.margin      = margin(2, 2, 2, 2),
+    axis.title       = element_blank(),
+    axis.text        = element_blank(),
+    axis.ticks       = element_blank(),
+    axis.line        = element_blank(),
+    strip.background = element_blank(),
+    strip.text.x     = element_text(size = 11, face = "bold",
+                                    family = "Arial"),
+    strip.placement  = "outside"
+  )
+
+# Rename the default "Tree" strip to "Phylogenetic tree"
+tree_sum_read_plot_clean <- ggtree::facet_labeller(
+  tree_sum_read_plot_clean,
+  c(Tree = "Phylogenetic tree")
+)
+
+# Relative panel widths to match the original manuscript layout
+tree_sum_read_plot_clean <- ggtree::facet_widths(
+  tree_sum_read_plot_clean,
+  widths = c(Tree = 1.2,
+             `Log sum rarefied reads\n(abundances)` = 1,
+             Family = 0.7)
+)
+
+tree_sum_read_plot_clean
+
+ggsave(
+  plot     = tree_sum_read_plot_clean,
+  filename = "figures/figures_manuscript/tree_sum_read_plot.svg",
+  units    = "cm", height = 24, width = 35
+)
+```
 

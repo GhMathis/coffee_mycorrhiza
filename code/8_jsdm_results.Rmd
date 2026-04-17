@@ -160,14 +160,7 @@ postBeta_gauss <- getPostEstimate(m_best_gauss, parName = "Beta")
 mpost_gauss    <- convertToCodaObject(m_best_gauss)
 
 gelman_diag_gauss <- gelman.diag(mpost_gauss$Beta, multivariate = FALSE)
-hist(gelman_diag_gauss$psrf[, 1], breaks = 50,
-     main = paste("Gelman-Rubin PSRF - Gaussian", best_gauss_name),
-     xlab = "PSRF (should be < 1.1)")
-
-ess_gauss <- effectiveSize(mpost_gauss$Beta)
-hist(ess_gauss, breaks = 50,
-     main = paste("Effective sample size - Gaussian", best_gauss_name),
-     xlab = "Effective sample size")
+ess_gauss         <- effectiveSize(mpost_gauss$Beta)
 
 cat("\n--- Rho convergence (Gaussian) ---\n")
 gelman.diag(mpost_gauss$Rho, multivariate = FALSE)
@@ -181,18 +174,79 @@ postBeta_bin <- getPostEstimate(m_best_bin, parName = "Beta")
 mpost_bin    <- convertToCodaObject(m_best_bin)
 
 gelman_diag_bin <- gelman.diag(mpost_bin$Beta, multivariate = FALSE)
-hist(gelman_diag_bin$psrf[, 1], breaks = 50,
-     main = paste("Gelman-Rubin PSRF - Probit", best_bin_names[2]),
-     xlab = "PSRF (should be < 1.1)")
-
-ess_bin <- effectiveSize(mpost_bin$Beta)
-hist(ess_bin, breaks = 50,
-     main = paste("Effective sample size - Probit", best_bin_names[2]),
-     xlab = "Effective sample size")
+ess_bin         <- effectiveSize(mpost_bin$Beta)
 
 cat("\n--- Rho convergence (Probit) ---\n")
 gelman.diag(mpost_bin$Rho, multivariate = FALSE)
 summary(mpost_bin$Rho)
+```
+
+## 5.3 Combined convergence diagnostic plot
+
+Builds a 2x2 panel (PSRF and effective sample size for both the Gaussian and
+probit models) and saves it to the manuscript figures folder.
+
+```{r convergence-combined, echo=FALSE, fig.height=7, fig.width=8}
+convergence_df <- bind_rows(
+  data.frame(value = gelman_diag_gauss$psrf[, 1],
+             metric = "Gelman-Rubin PSRF",
+             model  = "Abundance (Gaussian)"),
+  data.frame(value = ess_gauss,
+             metric = "Effective sample size",
+             model  = "Abundance (Gaussian)"),
+  data.frame(value = gelman_diag_bin$psrf[, 1],
+             metric = "Gelman-Rubin PSRF",
+             model  = "Occurrence (Probit)"),
+  data.frame(value = ess_bin,
+             metric = "Effective sample size",
+             model  = "Occurrence (Probit)")
+) %>%
+  mutate(metric = factor(metric,
+                         levels = c("Gelman-Rubin PSRF",
+                                    "Effective sample size")),
+         model  = factor(model,
+                         levels = c("Abundance (Gaussian)",
+                                    "Occurrence (Probit)")))
+
+psrf_df <- convergence_df %>% filter(metric == "Gelman-Rubin PSRF")
+ess_df  <- convergence_df %>% filter(metric == "Effective sample size")
+
+p_psrf <- ggplot(psrf_df, aes(x = value)) +
+  geom_histogram(bins = 50, fill = "#366785", colour = "white",
+                 linewidth = 0.2) +
+  geom_vline(xintercept = 1.1, linetype = 2, colour = "#c85200") +
+  facet_wrap(~model, scales = "free") +
+  labs(x = "PSRF (should be < 1.1)", y = "Count",
+       title = "Gelman-Rubin potential scale reduction factor") +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),
+        strip.background = element_blank(),
+        plot.title       = element_text(size = 11, face = "bold"),
+        strip.text       = element_text(size = 10, face = "italic"))
+
+p_ess <- ggplot(ess_df, aes(x = value)) +
+  geom_histogram(bins = 50, fill = "#1b7837", colour = "white",
+                 linewidth = 0.2) +
+  facet_wrap(~model, scales = "free") +
+  labs(x = "Effective sample size", y = "Count",
+       title = "Effective sample size of Beta posterior") +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),
+        strip.background = element_blank(),
+        plot.title       = element_text(size = 11, face = "bold"),
+        strip.text       = element_text(size = 10, face = "italic"))
+
+convergence_diagnostics <- p_psrf / p_ess +
+  plot_annotation(
+    theme    = theme(plot.title    = element_text(face = "bold", size = 13),
+                     plot.subtitle = element_text(size = 9))
+  )
+
+ggsave(plot = convergence_diagnostics,
+       filename = "figures/figures_manuscript/convergence_diagnostics.pdf",
+       units = "cm", height = 20, width = 22)
+
+convergence_diagnostics
 ```
 
 # 6 -- Beta heatmap on phylogenetic tree
@@ -803,7 +857,7 @@ XData_gauss <- XData.grid_limited[, model_covariates_gauss, drop = FALSE]
 save_path_gauss <- "outputs/models/abundance_prediction_gauss_best_waic.RData"
 
 if (file.exists(save_path_gauss)) {
-  load(save_path_gauss)
+  temp <- load(save_path_gauss)
 } else {
   Gradient_gauss <- prepareGradient(
     m_best_gauss,
@@ -823,21 +877,53 @@ if (file.exists(save_path_gauss)) {
   }
   save(EpredY_map_limited, file = save_path_gauss)
 }
+load("outputs/models/cv_gauss_best_waic.RData")
+```
+
+```{r}
+mPredY_gauss %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code, names_to = "genus", values_to = "pred") -> pred_gauss_long
+
+m_best_gauss$Y %>%
+  as.data.frame() %>%
+  rownames_to_column("Sample_code") %>%
+  pivot_longer(-Sample_code, names_to = "genus", values_to = "obs") -> obs_gauss_long
+
+cv_gauss_df <- pred_gauss_long %>%
+  left_join(obs_gauss_long, by = c("Sample_code", "genus"))
+
+# RMSE per genus
+rmse_gauss_df <- cv_gauss_df %>%
+  group_by(genus) %>%
+  summarise(
+    RMSE      = sqrt(mean((pred - obs)^2, na.rm = TRUE)),
+    mean_obs  = mean(obs, na.rm = TRUE),
+    mean_pred  = mean(pred, na.rm = TRUE),
+    sd_obs    = sd(obs, na.rm = TRUE),
+    .groups   = "drop"
+  ) %>%
+  mutate(rel_RMSE = RMSE / mean_obs) %>%
+  arrange(RMSE) %>%
+
+  mutate(genus = str_replace(genus, "Unknown ", "Unk. "),
+         genus = str_replace(genus, "_", " "),
+         genus = str_replace(genus, "OTU", "ASV"))
+
 ```
 
 ```{r abundance-map-data}
 colnames(EpredY_map_limited) <- colnames(EpredY_map_limited) %>%
   str_replace("Unknown ", "Unk. ") %>%
-  str_replace("_", " ")
+  str_replace("_", " ") %>%
+  str_replace("OTU", "ASV")
 
 data_spatial_limited_df %>%
   bind_cols(as.data.frame(EpredY_map_limited)) %>%
   mutate(pixel_ID = as.factor(1:n())) %>%
   pivot_longer(-c(pixel_ID, x, y, ndvi, precip, tmax, tdelta, wind),
-               values_to = "abundance", names_to = "genus") %>%
-  left_join(taxomony_AMF_genuslevel, by = "genus") %>%
-  mutate(genus = str_replace(genus, "Unknown ", "Unk. "),
-         genus = str_replace(genus, "_", " ")) -> EpredY_abundance_df_limited
+               values_to = "abundance", names_to = "genus")  -> EpredY_abundance_df_limited
 ```
 
 ## 11.4 Probit occurrence prediction
@@ -917,29 +1003,31 @@ ROC_df %>%
   rename(TPR_b = "TPR", FPR_b = "FPR") %>%
   distinct() %>%
   # Manually set threshold for genera that are always present
-  rbind(., data.frame(pred_name = c("Acaulospora (88 ASV)",
-                                    "Unk. Glomeraceae (120 ASV)"),
+  rbind(., data.frame(pred_name = c("Acaulospora (88 OTU)",
+                                    "Unk. Glomeraceae (120 OTU)"),
                       threshold = 0, balanced_score = NA,
                       TPR_b = NA, FPR_b = NA)) %>%
-  mutate(threshold = case_when(pred_name %in% c("Nanoglomus (128 ASV)",
-                                                "Sclerocystis (52 ASV)") ~ 0,
+  mutate(threshold = case_when(pred_name %in% c("Nanoglomus (128 OTU)",
+                                                "Sclerocystis (52 OTU)") ~ 0,
                                .default = threshold),
-         TPR_b = case_when(pred_name %in% c("Nanoglomus (128 ASV)",
-                                            "Sclerocystis (52 ASV)") ~ NA,
+         TPR_b = case_when(pred_name %in% c("Nanoglomus (128 OTU)",
+                                            "Sclerocystis (52 OTU)") ~ NA,
                            .default = TPR_b),
-         FPR_b = case_when(pred_name %in% c("Nanoglomus (128 ASV)",
-                                            "Sclerocystis (52 ASV)") ~ NA,
+         FPR_b = case_when(pred_name %in% c("Nanoglomus (128 OTU)",
+                                            "Sclerocystis (52 OTU)") ~ NA,
                            .default = FPR_b)) -> balanced_score_df
 ```
 
 ```{r occurrence-map-data}
 colnames(EpredY_map_limited) <- colnames(EpredY_map_limited) %>%
   str_replace("Unknown ", "Unk. ") %>%
-  str_replace("_", " ")
+  str_replace("_", " ") %>%
+  str_replace("OTU", "ASV")
 
 balanced_score_df <- balanced_score_df %>%
   mutate(pred_name = str_replace(pred_name, "_", " "),
-         pred_name = str_replace(pred_name, "Unknown ", "Unk. "))
+         pred_name = str_replace(pred_name, "Unknown ", "Unk. "),
+        pred_name = str_replace(pred_name, "OTU", "ASV"))
 
 EpredY_map_limited <- EpredY_map_limited[, balanced_score_df$pred_name]
 
@@ -954,8 +1042,7 @@ data_spatial_limited_df %>%
   mutate(pixel_ID = as.factor(1:n())) %>%
   pivot_longer(-c(pixel_ID, x, y, ndvi, precip, tmax, tdelta, wind),
                values_to = "occurrence", names_to = "genus") %>%
-  mutate(occurrence = as.factor(occurrence)) %>%
-  left_join(taxomony_AMF_genuslevel, by = "genus") -> EpredY_occurrence_df_limited
+  mutate(occurrence = as.factor(occurrence)) -> EpredY_occurrence_df_limited
 ```
 
 # 12 -- Prediction maps
@@ -989,8 +1076,63 @@ EpredY_occurrence_df_limited %>%
 
 map_occurrence_all
 ```
+## 12.3 Best predicted genus abundance map
 
-## 12.3 Per-family abundance maps (Gaussian)
+```{r occurence-abundance best predicted, echo=FALSE, fig.height=22, fig.width=22}
+library(scico)
+rmse_gauss_df %>%
+  slice_min(rel_RMSE, n = 12L) %>%
+  pull(genus) -> best_predicted_abundance
+
+EpredY_abundance_df_limited %>%
+  left_join(rmse_gauss_df, by= "genus") %>%
+  left_join(balanced_score_df, by= join_by ("genus" == "pred_name")) %>%
+  left_join(EpredY_occurrence_df_limited %>% 
+              dplyr::select(occurrence, pixel_ID, genus),
+            by =  join_by("pixel_ID" == "pixel_ID",
+                          "genus" == "genus")) %>%
+  filter(genus %in% best_predicted_abundance) %>%
+  mutate(genus = fct_reorder(genus, mean_obs, .desc = T)) %>%
+  group_by(genus) %>%
+  mutate(rescaled_abund = (abundance - min(abundance)) / (max(abundance) - min(abundance)),
+         rescaled_abund = case_when(occurrence == 0 ~ 0,
+                                    .default = rescaled_abund )) %>%
+   ggplot() +
+    geom_sf(data = ug_border, alpha =0.4) +
+    facet_wrap(~genus) +
+    geom_text(aes(31,4.3, label = paste("Relative RMSE = ", round(rel_RMSE,2))), size = 4, fontface = "plain") +
+    geom_text(aes(31,4, label = paste("Avg. A. (log) = ", round(mean_obs,2))), size = 4, fontface = "plain") +
+    geom_text(aes(33.5,-0.5, label = paste("TPR =", round(TPR_b,2))), size = 4, fontface = "plain") +
+    geom_text(aes(33.5,-1, label = paste("FPR =", round(FPR_b,2))), size = 4, fontface = "plain") +
+    geom_tile(aes(x, y, fill = rescaled_abund)) +
+    scale_fill_gradientn(
+      
+      colours = c("#BED5DC", "#6EAFBF", "#7FC088", "#F3D346", "#EF7D3B", "#B8232A"),
+      values  = scales::rescale(c(0, 0.15, 0.45, 0.75, 1)),
+      limits  = c(0, 1),
+      breaks  = c(0, 0.25, 0.5, 0.75, 1),
+      name    = "Rescaled genus abundance"
+    ) +
+    labs(x = "Longitude", y = "Latitude", fill = "Rescale genus abundances") + 
+    theme_classic() +
+    theme(
+      aspect.ratio = 1,
+      legend.position = "bottom",
+      plot.margin = margin(0, 0, 0, 0),
+      axis.title.x = element_text(colour = "black", size = 13),
+      panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+      axis.title.y = element_text(colour = "black", size = 13),
+      strip.text.x = element_text(size = 13),
+      legend.title=element_text(size=13)
+    ) -> map_abundance_limited_best_predicted_genus
+
+map_abundance_limited_best_predicted_genus
+
+ggsave(plot = map_abundance_limited_best_predicted_genus, filename = "figures/figures_manuscript/map_limited_best_predicted_genus_gauss_best_waic.pdf", units = "cm",width = 32 ,height = 32)
+```
+
+## 12.4 Per-family abundance maps (Gaussian
+
 
 ### Glomeraceae
 
@@ -1083,7 +1225,7 @@ ggsave(plot = abundance_Diversisporaceae_map,
 abundance_Diversisporaceae_map
 ```
 
-## 12.4 Per-family occurrence maps (Probit)
+## 12.5 Per-family occurrence maps (Probit)
 
 ### Glomeraceae
 
@@ -1177,32 +1319,6 @@ occurrence_Diversisporaceae_map
 ```{r richness-maps, echo=FALSE, fig.height=6, fig.width=12}
 map_ug <- rnaturalearth::ne_states("Uganda", returnclass = "sf")
 
-# Gaussian richness (abundance > 0)
-EpredY_abundance_df_limited %>%
-  filter(!str_detect(genus, "Unk.")) %>%
-  mutate(present = abundance > 0) %>%
-  group_by(pixel_ID) %>%
-  summarise(richness = sum(present),
-            x = first(x),
-            y = first(y)) %>%
-  ggplot() +
-  geom_sf(data = map_ug, alpha = 0.4) +
-  geom_tile(aes(x, y, fill = richness), alpha = 0.9) +
-  annotation_north_arrow(
-    location = "tr", which_north = "true",
-    height = unit(1, "cm"), width = unit(1, "cm"),
-    style = north_arrow_minimal(
-      line_col = "black", fill = "black",
-      text_col = "black", line_width = 2, text_size = 10)) +
-  scale_fill_viridis(option = "magma") +
-  labs(x = "Longitude", y = "Latitude",
-       fill = "Known genus\nrichness (predicted)") +
-  main_theme_final -> map_richness_gauss
-
-ggsave(plot = map_richness_gauss,
-       filename = "figures/genus_gauss_autocorr/map_richness_gauss_best_waic.pdf",
-       units = "cm", width = 12, height = 12)
-
 # Probit richness (thresholded occurrence)
 EpredY_occurrence_df_limited %>%
   filter(!str_detect(genus, "Unk.")) %>%
@@ -1211,24 +1327,26 @@ EpredY_occurrence_df_limited %>%
             x = first(x),
             y = first(y)) %>%
   ggplot() +
+  
   geom_sf(data = map_ug, alpha = 0.4) +
   geom_tile(aes(x, y, fill = richness), alpha = 0.9) +
+  geom_point(data =covariate_standa_df, aes(x = lon,y = lat),cex = 1.3, shape =21, fill = "white", col = "black", alpha =0.6) +
   annotation_north_arrow(
     location = "tr", which_north = "true",
     height = unit(1, "cm"), width = unit(1, "cm"),
     style = north_arrow_minimal(
       line_col = "black", fill = "black",
       text_col = "black", line_width = 2, text_size = 10)) +
-  scale_fill_viridis(option = "magma") +
+  scale_fill_viridis(option = "magma", direction = -1, begin = 0.1) +
   labs(x = "Longitude", y = "Latitude",
        fill = "Predicted genus\nrichness") +
   main_theme_final -> map_richness_bin
 
 ggsave(plot = map_richness_bin,
-       filename = "figures/genus_bin_autocorr/map_richness_bin_best_waic.pdf",
+       filename = "figures/figures_manuscript/map_richness_bin_seconb_best_waic.pdf",
        units = "cm", width = 12, height = 12)
 
-map_richness_gauss + map_richness_bin
+map_richness_bin
 ```
 
 # 14 -- Session info

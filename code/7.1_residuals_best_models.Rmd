@@ -1,0 +1,223 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-04-17"
+---
+
+```{r setup, include=FALSE}
+library(Hmsc)
+library(DHARMa)
+library(tidyverse)
+```
+
+# Residual diagnostics for the two retained models
+
+DHARMa whole-model residual analysis for the two models kept in the manuscript:
+
+- **Abundance (Gaussian):** best WAIC model
+- **Occurrence (Probit):** second-best WAIC model (selected because it showed
+  better cross-validated AUC than the best WAIC model, see
+  `7_cross_validation_best_models.Rmd`).
+
+Each diagnostic panel (QQ + residuals-vs-predicted) is saved to
+`figures/figures_manuscript/`. Uniformity, dispersion, outlier, and spatial
+autocorrelation tests are also printed to the console.
+
+```{r load-retained-models}
+load("outputs/models/list_mods_genus_gauss_phylo_autocorr.RData")
+load("outputs/models/list_mods_bin_phylo_autocorr_genus.RData")
+
+load("outputs/models/WAIC_gauss_mod.txt")        # saved via save()
+WAIC_bin_mod <- read.table("outputs/models/WAIC_bin_mod.txt")
+
+best_gauss_name <- WAIC_gauss_mod %>%
+  arrange(WAIC_vecor) %>% slice(1) %>% pull(model_names)
+
+best_bin_name <- WAIC_bin_mod %>%
+  arrange(WAIC_vecor_bin) %>% slice(2) %>% pull(model_names_bin)
+
+cat("Retained Gaussian model (best WAIC):", best_gauss_name, "\n")
+cat("Retained Probit model (2nd-best WAIC):", best_bin_name, "\n")
+
+m_gauss_retained <- list_mods[[best_gauss_name]]$m_converg
+m_bin_retained   <- list_mods_bin[[best_bin_name]]$m_converg
+```
+
+## Abundance (Gaussian) — best WAIC
+
+`predict()` returns a list of length `nChains * nSamples`. Each element is an
+`[n_sites x n_species]` matrix of posterior predictive draws. We reshape this
+per species into an `[n_sites x n_samples]` simulation matrix for DHARMa.
+
+```{r residuals-gauss-retained, fig.height=5, fig.width=10}
+Y_gauss  <- m_gauss_retained$Y
+xy_gauss <- m_gauss_retained$XData[, c("lon", "lat")]
+
+preds_gauss <- stats::predict(m_gauss_retained,
+                              XData= m_gauss_retained$XData,
+                              predictEtaMean = TRUE,
+                              expected       = TRUE)
+
+n_species_gauss <- ncol(preds_gauss[[1]])
+n_sites_gauss   <- nrow(preds_gauss[[1]])
+n_samples_gauss <- length(preds_gauss)
+
+# Stack list -> 3D array [n_sites x n_species x n_samples]
+preds_arr_gauss <- array(unlist(preds_gauss),
+                         dim = c(n_sites_gauss, n_species_gauss, n_samples_gauss))
+
+sim_list_gauss <- vector("list", n_samples_gauss)
+
+library(matrixStats)
+
+colnames(Y_gauss) == colnames(preds_gauss[[1]])
+for (j in 1:n_samples_gauss) {
+  sim_j <- preds_gauss[[j]]          # [n_sites x n_samples]
+  sim_j[is.na(Y_gauss)] <- NA
+  sim_j <- na.omit(as.vector(sim_j))
+  sim_list_gauss[[j]] <- sim_j
+}
+
+sim_unlist_gauss <- array(unlist(sim_list_gauss), c(dim(sim_list_gauss[[1]]), length(sim_list_gauss)))
+mod_gauss <- rowMedians(do.call(cbind, sim_list_gauss), na.rm = T)
+
+str(do.call(cbind, sim_list_gauss))
+str(na.omit(as.vector(Y_gauss)))
+str(mod_gauss)
+
+dharma_gauss <- createDHARMa(
+  simulatedResponse       = do.call(cbind, sim_list_gauss),
+  observedResponse        = na.omit(as.vector(Y_gauss)),
+  fittedPredictedResponse = mod_gauss,
+  integerResponse         = FALSE,
+    
+)
+
+pdf("figures/figures_manuscript/residuals_dharma_gauss_best_waic.pdf",
+    width = 10, height = 5)
+plot(dharma_gauss, main = "DHARMa residuals -- Abundance (Gaussian):")
+dev.off()
+
+plot(dharma_gauss, main = "DHARMa residuals -- Abundance (Gaussian):")
+
+cat("\n--- Uniformity ---\n");  print(testUniformity(dharma_gauss))
+cat("\n--- Dispersion ---\n");  print(testDispersion(dharma_gauss))
+cat("\n--- Outliers ---\n");    print(testOutliers(dharma_gauss))
+
+# Stack xy once per species to match the column-major order of as.vector(Y_gauss),
+# then drop the same NA positions that na.omit() dropped from observed/simulated.
+xy_all_gauss      <- xy_gauss[rep(seq_len(n_sites_gauss), times = n_species_gauss), ]
+xy_all_gauss      <- xy_all_gauss[!is.na(as.vector(Y_gauss)), , drop = FALSE]
+coord_key_gauss   <- paste(xy_all_gauss[, "lon"], xy_all_gauss[, "lat"], sep = "_")
+coord_fac_gauss   <- factor(coord_key_gauss)
+dharma_site_gauss <- recalculateResiduals(dharma_gauss, group = coord_fac_gauss)
+xy_unique_gauss   <- xy_all_gauss[match(levels(coord_fac_gauss), coord_key_gauss), ]
+
+cat("\n--- Spatial autocorrelation ---\n")
+pdf("figures/figures_manuscript/spatial_autocorr_dharma_gauss_second_best_waic.pdf",
+    width = 10, height = 5)
+print(testSpatialAutocorrelation(dharma_site_gauss,
+                                 x = xy_unique_gauss[, "lon"],
+                                 y = xy_unique_gauss[, "lat"]))
+dev.off()
+```
+	DHARMa Moran's I test for distance-based autocorrelation
+
+data:  dharma_site_gauss
+observed = -0.080486, expected = -0.011494, sd = 0.080821, p-value = 0.3933
+alternative hypothesis: Distance-based autocorrelation
+
+## Occurrence (Probit) — second-best WAIC
+
+```{r residuals-bin-retained, fig.height=5, fig.width=10}
+Y_bin  <- m_bin_retained$Y
+xy_bin <- m_bin_retained$XData[, c("lon", "lat")]
+remove_genus_always_occur <- colnames(Y_bin)[colSums(Y_bin)<86]
+Y_bin <- Y_bin[,remove_genus_always_occur]
+preds_bin <- stats::predict(m_bin_retained,
+                            XData          = m_bin_retained$XData,
+                            predictEtaMean = TRUE,
+                            expected       = TRUE)
+
+n_samples_bin <- length(preds_bin)
+for (j in 1:n_samples_bin) {
+  preds_bin[[j]] <- preds_bin[[j]][,remove_genus_always_occur]          # [n_sites x n_species] probabilities
+}
+str(preds_bin)
+n_species_bin <- ncol(preds_bin[[1]])
+n_sites_bin   <- nrow(preds_bin[[1]])
+
+
+# Stack list -> 3D array [n_sites x n_species x n_samples]
+preds_arr_bin <- array(unlist(preds_bin),
+                       dim = c(n_sites_bin, n_species_bin, n_samples_bin))
+
+sim_list_bin <- vector("list", n_samples_bin)
+
+colnames(Y_bin) == colnames(preds_bin[[1]])
+for (j in 1:n_samples_bin) {
+  prob_j <- preds_bin[[j]]          # [n_sites x n_species] probabilities
+  sim_list_bin[[j]] <- as.vector(prob_j)
+}
+
+# Posterior mean probability as fitted value
+mod_bin <- rowMeans(do.call(cbind, sim_list_bin))
+
+str(do.call(cbind, sim_list_bin))
+str(as.vector(Y_bin))
+str(mod_bin)
+
+dharma_bin <- createDHARMa(
+  simulatedResponse       = +do.call(cbind, sim_list_bin)>0.5,
+  observedResponse        = as.vector(Y_bin),
+  fittedPredictedResponse = mod_bin,
+  integerResponse         = T
+)
+
+pdf("figures/figures_manuscript/residuals_dharma_bin_second_best_waic.pdf",
+    width = 10, height = 5)
+plot(dharma_bin, main = "DHARMa residuals -- Occurrence (Probit):")
+dev.off()
+
+plot(dharma_bin, main = "DHARMa residuals -- Occurrence (Probit):")
+
+cat("\n--- Uniformity ---\n");  print(testUniformity(dharma_bin))
+cat("\n--- Dispersion ---\n");  print(testDispersion(dharma_bin))
+cat("\n--- Outliers ---\n");    print(testOutliers(dharma_bin))
+
+# Stack xy once per species to match the column-major order of as.vector(Y_bin).
+# Occurrence data contains no NAs, so no filtering is needed.
+
+dharma_bin <- createDHARMa(
+  simulatedResponse       = do.call(cbind, sim_list_bin),
+  observedResponse        = as.vector(Y_bin),
+  fittedPredictedResponse = mod_bin,
+  integerResponse         = F
+)
+
+xy_all_bin      <- xy_bin[rep(seq_len(n_sites_bin), times = n_species_bin), ]
+coord_key_bin   <- paste(xy_all_bin[, "lon"], xy_all_bin[, "lat"], sep = "_")
+coord_fac_bin   <- factor(coord_key_bin)
+str(coord_fac_bin)
+dharma_site_bin <- recalculateResiduals(dharma_bin, group = coord_fac_bin)
+xy_unique_bin   <- xy_all_bin[match(levels(coord_fac_bin), coord_key_bin), ]
+
+cat("\n--- Spatial autocorrelation ---\n")
+print(testSpatialAutocorrelation(dharma_site_bin,
+                                 x = xy_unique_bin[, "lon"],
+                                 y = xy_unique_bin[, "lat"]))
+pdf("figures/figures_manuscript/spatial_autocorr_dharma_bin_second_best_waic.pdf",
+    width = 10, height = 5)
+testSpatialAutocorrelation(dharma_site_bin,
+                            x = xy_unique_bin[, "lon"],
+                            y = xy_unique_bin[, "lat"], plot = T)
+dev.off()
+```
+Show in New Window
+
+	DHARMa Moran's I test for distance-based autocorrelation
+
+data:  dharma_site_bin
+observed = 0.064254, expected = -0.011494, sd = 0.080703, p-value = 0.3479
+alternative hypothesis: Distance-based autocorrelation
+

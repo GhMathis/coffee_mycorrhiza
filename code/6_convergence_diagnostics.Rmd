@@ -7,10 +7,17 @@ date: "2026-03-30"
 ```{r setup, include=FALSE}
 library(Hmsc)
 library(DHARMa)
+library(tidyverse)
 ```
 
+# Full convergence + residual diagnostics over all 32 models
+
+The remainder of this script runs PSRF / ESS and DHARMa diagnostics over all
+32 candidate models for both response families. This is used to compute the
+WAIC tables consumed by the retained-model block above.
+
 ```{r load-models}
-load(file = "outputs/models/list_mods_genus_gauss_phylo_autocorr.RData")
+# list_mods already loaded in the retained-models block above
 ```
 
 ```{r convergence}
