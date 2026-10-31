@@ -109,9 +109,13 @@ best_gauss_name <- WAIC_gauss_mod %>%
   slice_min(WAIC_vecor, n = 1) %>%
   pull(model_names)
 m_best_gauss <- list_mods[[best_gauss_name]]$m_converg
-
+WAIC_gauss_mod %>% 
+  arrange(WAIC_vecor)
 cat("Best Gaussian model:", best_gauss_name, "\n")
+```
 
+
+```{r load-models}
 # Probit (occurrence) models
 load(file = "outputs/models/list_mods_bin_phylo_autocorr_genus.RData")
 read.table("outputs/models/WAIC_bin_mod.txt") -> WAIC_bin_mod
@@ -287,6 +291,9 @@ ggsave(plot = rmse_plot,
        units = "cm", height = 18, width = 14)
 
 rmse_plot
+```
+```{r}
+mean(rmse_gauss_df$RMSE, na.rm = T)
 ```
 
 ```{r gauss-obs-vs-pred, echo=FALSE, fig.height=10, fig.width=10}
@@ -550,7 +557,7 @@ ROC_curve_plot2
 
 ## 7.2 Comparison: best vs second best occurrence model
 
-```{r bin-comparison, echo=FALSE, fig.height=8, fig.width=10}
+```{r bin-comparison, echo=FALSE, fig.height=18, fig.width=16}
 bind_rows(
   auc_bin_df %>% mutate(model = best_bin_name),
   auc_bin2_df %>% mutate(model = second_bin_name)
@@ -566,12 +573,12 @@ bind_rows(
   labs(x = "AUC (cross-validated)",
        y = NULL,
        color = "Models",
-       title = "AUC comparison: best WAIC (orange) vs second best WAIC occurrence model (blue)",
+       title = "AUC comparison: best WAIC (orange) vs \n second best WAIC occurrence model (blue)",
        subtitle = paste(nfolds, "fold CV")) +
   main_theme_final +
   theme(axis.text.y = element_text(size = 9),
         legend.text =  element_text(size = 9),
-        legend.position = "bottom") -> auc_comparison_plot
+        legend.position = "none") -> auc_comparison_plot
 
 ggsave(plot = auc_comparison_plot,
        filename = "figures/genus_bin_autocorr/auc_comparison_best_vs_second.pdf",

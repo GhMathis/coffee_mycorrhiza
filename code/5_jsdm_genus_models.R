@@ -68,7 +68,9 @@ rL_iid     <- HmscRandomLevel(units = studyDesign$sample_id)
 library(GGally)
 covariate_standa_df %>% 
   select(-c(lon, lat, tmin, Sample_code)) %>%
-  GGally::ggpairs()
+  GGally::ggpairs() -> covariate_plot
+str(covariate_plot)
+ggsave(covariate_plot, path = "covariate_plot.pdf")
 ## ----echo=FALSE---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # All 2^5 = 32 additive combinations of covariates (null through full), with phylogenetic tree
 covariates <- c("ndvi", "precip", "tmax", "tdelta", "wind")
