@@ -1,0 +1,118 @@
+---
+title: "Supplementary analysis: SoilGrids vs measured soil properties"
+output: html_document
+date: "2026-11-06"
+editor_options:
+  chunk_output_type: inline
+---
+
+Supplementary analysis. It compares the SoilGrids rasters (pH, clay, nitrogen, organic carbon) with the soil properties measured at each sampling point (`data/soil_data_dry_season_2023.xlsx`).
+
+```{r include=FALSE}
+library(tidyverse)
+library(readxl)
+library(sf)
+library(terra)
+library(patchwork)
+
+dir.create("figures/supplementary", recursive = TRUE, showWarnings = FALSE)
+
+main_theme_final = theme_bw() +
+ theme(aspect.ratio = 1,
+        axis.text = element_text(colour = "black", size=9),
+        axis.title = element_text(colour = "black", size=10),
+        panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.8))
+```
+
+```{r include=FALSE}
+# Sampling points in WGS84 (same conversion and corrections as in 4_setup_data_for_model.Rmd)
+utm_coords <- read_xlsx(path = "data/Metadata_Doreen_070525.xlsx") %>%
+  mutate(
+    zone = as.numeric(substr(easting, 1, 2)),
+    band = substr(easting, 3, 3),
+    easting = as.numeric(sub(".* ", "", easting)),
+    northing = as.numeric(northing),
+    hemisphere = ifelse(band == "N", "north", "south")
+  ) %>%
+  mutate(zone = case_when(zone == 32 ~ 36, .default = zone),
+         northing = case_when(Sample_code == "N17" ~ 86562, .default = northing))
+
+convert_to_wgs84 <- function(zone, hemisphere, easting, northing, Sample_code) {
+  epsg <- if (hemisphere == "north") 32600 + zone else 32700 + zone
+  point <- st_sfc(st_point(c(easting, northing)), crs = epsg)
+  coords <- st_coordinates(st_transform(point, crs = 4326))
+  tibble(lon = coords[1], lat = coords[2], Sample_code = Sample_code)
+}
+
+wgs84_coords <- pmap_dfr(utm_coords[, c("zone", "hemisphere", "easting", "northing", "Sample_code")],
+                         convert_to_wgs84)
+
+# Measured soil data, converted to the SoilGrids units
+soil <- read_xlsx("data/soil_data_dry_season_2023.xlsx") %>%
+  transmute(Sample_code = `SAMPLE NO`,
+            ph = `soil pH`,            # pH
+            clay = `Clay%`,            # %
+            nitrogen = `N%` * 10,      # % -> g/kg
+            carbon = `OC%` * 10)       # % -> g/kg
+
+# SoilGrids value at each point; raw raster units are converted to the same units as above
+# A raster value of 0 is treated as missing
+soilgrids <- tribble(
+  ~variable, ~file,                                ~divide_by, ~label,
+  "ph",       "ph_soilgrid2.tif",                   10,        "pH",
+  "clay",     "clay_contend_soilgrid2.tif",         10,        "Clay (%)",
+  "nitrogen", "N_contend_soilgrid2.tif",            100,       "Nitrogen (g/kg)",
+  "carbon",   "soil_organic_carbon_soilgrid2.tif",  10,        "Organic carbon (g/kg)")
+
+pts <- vect(wgs84_coords, geom = c("lon", "lat"), crs = "EPSG:4326")
+
+extract_soilgrids <- function(file, divide_by) {
+  r <- rast(file.path("data/raster", file))
+  terra::extract(ifel(r == 0, NA, r / divide_by), pts)[, 2]
+}
+
+soilgrids_df <- map2(soilgrids$file, soilgrids$divide_by, extract_soilgrids) %>%
+  set_names(paste0(soilgrids$variable, "_soilgrid")) %>%
+  as_tibble() %>%
+  mutate(Sample_code = wgs84_coords$Sample_code)
+
+soil_df <- inner_join(soil, soilgrids_df, by = "Sample_code")
+```
+
+```{r include=FALSE}
+scatter_plot <- function(variable, label) {
+  df <- soil_df %>%
+    transmute(obs = .data[[variable]], pred = .data[[paste0(variable, "_soilgrid")]]) %>%
+    drop_na()
+
+  lims <- range(c(df$obs, df$pred))
+  fit <- lm(pred ~ obs, data = df)
+  txt <- sprintf("n = %d\nr = %.2f (p = %.2g)\nRMSE = %.2f",
+                 nrow(df), cor(df$obs, df$pred),
+                 summary(fit)$coefficients["obs", 4],
+                 sqrt(mean((df$pred - df$obs)^2)))
+
+  ggplot(df, aes(x = obs, y = pred)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey40") +
+    geom_smooth(method = "lm", formula = y ~ x, colour = "firebrick", fill = "firebrick", alpha = 0.15) +
+    geom_point(alpha = 0.7, size = 1.5) +
+    annotate("label", x = lims[1], y = lims[2], label = txt, hjust = 0, vjust = 1, size = 3,
+             fill = "white", alpha = 0.8, linewidth = 0) +
+    coord_fixed(xlim = lims, ylim = lims) +
+    labs(title = label, x = "Measured", y = "SoilGrids") +
+    main_theme_final
+}
+
+soil_scatter <- wrap_plots(map2(soilgrids$variable, soilgrids$label, scatter_plot), ncol = 2)
+```
+
+# SoilGrids vs measured soil properties
+
+Dashed line: 1:1; solid line: linear fit.
+
+```{r echo=FALSE, fig.width=8, fig.height=8}
+soil_scatter
+
+ggsave(plot = soil_scatter, filename = "figures/supplementary/soilgrids_vs_measured_soil.pdf",
+       units = "cm", width = 20, height = 20)
+```

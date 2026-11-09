@@ -88,6 +88,12 @@ amf_OTUs_decont %>%
   colSums()%>%
   sort()
 
+amf_OTUs_decont %>%
+  dplyr::select(starts_with("ROB"))%>%
+  colSums() -> temp3
+(temp3<2101) %>% sum
+(temp3>=2101) %>% sum
+88+30
 
 amf_OTUs_decont2 <- amf_OTUs_decont %>%
   #{{sample to exclude}}

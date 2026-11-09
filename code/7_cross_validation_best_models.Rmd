@@ -42,6 +42,11 @@ main_theme_final <- theme_bw() +
 # 2 -- Helper functions
 
 ```{r helper-functions}
+# Facet titles: line break before "(N OTU)" / "(N ASV)"
+roc_strip_labeller <- as_labeller(function(x) {
+  str_replace(as.character(x), " \\((\\d+ (?:OTU|ASV))\\)", "\n(\\1)")
+})
+
 compute.ROC <- function(observed, predicted, pred_name) {
   df_roc_AUC <- data.frame(
     threshold = sort(unique(predicted)),
@@ -288,10 +293,11 @@ rmse_gauss_df %>%
 
 ggsave(plot = rmse_plot,
        filename = "figures/genus_gauss_autocorr/relative_rmse_cv_gauss_best_waic.pdf",
-       units = "cm", height = 18, width = 14)
+       units = "cm", height = 24, width = 24)
 
 rmse_plot
 ```
+
 ```{r}
 mean(rmse_gauss_df$RMSE, na.rm = T)
 ```
@@ -304,14 +310,43 @@ cv_gauss_df %>%
   arrange(mean_abund) %>%
   pull(genus) -> order_genus_by_abund
 
+# Saved PDF size (cm): annotation text size is derived from it
+gauss_w_cm <- 24
+gauss_h_cm <- 24
+genus_levels_gauss <- str_replace(order_genus_by_abund, "OTU", "ASV")
+
+# Per-panel annotation: RMSE and number of observations (non-missing)
+rmse_labels <- cv_gauss_df %>%
+  group_by(genus) %>%
+  summarise(RMSE  = sqrt(mean((pred - obs)^2, na.rm = TRUE)),
+            n_obs = sum(!is.na(obs)),
+            .groups = "drop") %>%
+  mutate(genus = factor(str_replace(genus, "OTU", "ASV"),
+                        levels = genus_levels_gauss),
+         label = paste0("RMSE = ", sprintf("%.2f", RMSE),
+                        "\nn obs = ", n_obs))
+
+# Text size (ggplot mm) scaled with panel width in the PDF
+n_pan_gauss  <- length(genus_levels_gauss)
+ncol_gauss   <- ceiling(sqrt(n_pan_gauss))
+nrow_gauss   <- ceiling(n_pan_gauss / ncol_gauss)
+panel_cm_g   <- min(gauss_w_cm / ncol_gauss, gauss_h_cm / nrow_gauss)
+gauss_txt    <- pmin(10, pmax(4.5, panel_cm_g * 1.25)) / ggplot2::.pt
+
 cv_gauss_df %>%
   mutate(genus = str_replace(genus, "OTU", "ASV"),
-         genus = factor(genus, levels = str_replace(order_genus_by_abund, "OTU", "ASV")),
+         genus = factor(genus, levels = genus_levels_gauss),
          ) %>%
   ggplot(aes(obs, pred)) +
-  facet_wrap(~genus) +
+  facet_wrap(~genus, labeller = roc_strip_labeller) +
   geom_point(alpha = 0.6, size = 1.5) +
   geom_abline(slope = 1, linetype = "dashed", color = "blue") +
+  geom_label(data = rmse_labels,
+             aes(x = -Inf, y = Inf, label = label),
+             inherit.aes = FALSE,
+             hjust = -0.05, vjust = 1.1, lineheight = 0.9, size = gauss_txt,
+             col = "blue", fill = alpha("white", 0.75),
+             linewidth = 0, label.padding = unit(0.15, "lines")) +
   labs(x = "Observed abundance (log)", y = "Predicted abundance (log)",
        title = paste("Observed vs predicted")) +
   main_theme_final +
@@ -319,11 +354,11 @@ cv_gauss_df %>%
 
 ggsave(plot = obs_pred_gauss_plot,
        filename = "figures/genus_gauss_autocorr/obs_vs_pred_cv_gauss_best_waic.pdf",
-       units = "cm", height = 24, width = 24)
+       units = "cm", height = gauss_h_cm, width = gauss_w_cm)
 
 ggsave(plot = obs_pred_gauss_plot,
        filename = "figures/figures_manuscript/obs_vs_pred_cv_gauss_best_waic.pdf",
-       units = "cm", height = 24, width = 24)
+       units = "cm", height = gauss_h_cm, width = gauss_w_cm)
 
 obs_pred_gauss_plot
 ```
@@ -372,6 +407,32 @@ auc_plot
 ## 6.1 ROC curves per genus
 
 ```{r bin-roc-curves, echo=FALSE, fig.height=10, fig.width=10}
+# Saved PDF size (cm): annotation text size is derived from it
+roc_w_cm <- 24
+roc_h_cm <- 24
+
+# Build per-panel annotation data (AUC, number of true presences, threshold)
+# and a text size (ggplot mm) that scales with the panel width in the PDF.
+make_roc_labels <- function(Y, auc_df, balanced_df, genera) {
+  tibble(pred_name = genera) %>%
+    mutate(n_true = colSums(Y)[pred_name],
+           AUC    = auc_df$AUC[match(pred_name, auc_df$genus)]) %>%
+    left_join(balanced_df %>% ungroup() %>%
+                distinct(pred_name, threshold), by = "pred_name") %>%
+    mutate(label = paste0("AUC = ", sprintf("%.2f", AUC),
+                          "\nn presence = ", n_true,
+                          "\nthr = ", round(threshold, 2)))
+}
+
+roc_text_size <- function(n_panels, w_cm, h_cm) {
+  ncol_p  <- ceiling(sqrt(n_panels))
+  nrow_p  <- ceiling(n_panels / ncol_p)
+  panel_cm <- min(w_cm / ncol_p, h_cm / nrow_p)
+  pt <- pmin(10, pmax(4.5, panel_cm * 1.25))  # ~1.25 pt per cm of panel, bounded
+  pt / ggplot2::.pt                             # ggplot size is in mm
+}
+
+
 # Exclude genera with no variation (all present or all absent)
 genus_with_variation <- colnames(m_best_bin$Y)[
   colSums(m_best_bin$Y) > 0 & colSums(m_best_bin$Y) < nrow(m_best_bin$Y)
@@ -396,31 +457,58 @@ ROC_df %>%
   rename(TPR_b = "TPR", FPR_b = "FPR") %>%
   distinct() -> balanced_score_df
 
+# Panel ordering: choose "AUC" or "balanced_score"
+order_by   <- "AUC"   # "AUC" or "balanced_score"
+decreasing <- TRUE    # TRUE = best genus first (top-left)
+
+if (order_by == "AUC") {
+  auc_bin_df %>%
+    filter(genus %in% genus_with_variation) %>%
+    arrange(if (decreasing) desc(AUC) else AUC) %>%
+    pull(genus) -> order_genus_roc
+} else {
+  balanced_score_df %>%
+    ungroup() %>%
+    distinct(pred_name, balanced_score) %>%
+    arrange(if (decreasing) desc(balanced_score) else balanced_score) %>%
+    pull(pred_name) -> order_genus_roc
+}
+
+roc_labels <- make_roc_labels(m_best_bin$Y, auc_bin_df, balanced_score_df,
+                              genus_with_variation) %>%
+  mutate(pred_name = factor(pred_name, levels = order_genus_roc))
+roc_txt <- roc_text_size(length(genus_with_variation), roc_w_cm, roc_h_cm)
+
 ROC_df %>%
   left_join(balanced_score_df %>%
               rename(threshold_B = "threshold"),
             by = "pred_name") %>%
+  mutate(pred_name = factor(pred_name, levels = order_genus_roc)) %>%
   arrange(threshold) %>%
   ggplot() +
-  facet_wrap(~pred_name) +
+  facet_wrap(~pred_name, labeller = roc_strip_labeller) +
   geom_path(aes(x = FPR, y = TPR), linewidth = 0.8) +
   geom_vline(aes(xintercept = FPR_b), col = "blue", linetype = 2, linewidth = 0.6) +
   geom_hline(aes(yintercept = TPR_b), col = "blue", linetype = 2, linewidth = 0.6) +
-  geom_text(aes(x = 0.7, y = 0.1,
-                label = paste("thr =", round(threshold_B, 2))),
-            col = "blue", size = 1.5) +
+  geom_label(data = roc_labels,
+             aes(x = 0.97, y = 0.03, label = label),
+             hjust = 1, vjust = 0, lineheight = 0.9, size = roc_txt,
+             col = "blue", fill = alpha("white", 0.75),
+             linewidth = 0, label.padding = unit(0.15, "lines")) +
   coord_cartesian(xlim = c(0, 1), ylim = c(0, 1.01), expand = FALSE) +
   geom_abline(linetype = "dashed") +
   labs(x = "False Positive Rate\n(False presence predicted / all true absence)",
        y = "True Positive Rate\n(True presence predicted / all true presence)",
-       title = paste("ROC curves -", best_bin_name)) +
+       title = paste("ROC curves -", best_bin_name),
+       subtitle = paste("Panels ordered by", order_by,
+                        if (decreasing) "(decreasing)" else "(increasing)")) +
   main_theme_final -> ROC_curve_plot
-
+ROC_curve_plot
 ggsave(plot = ROC_curve_plot,
        filename = "figures/genus_bin_autocorr/ROC_curves_bin_best_waic.pdf",
-       units = "cm", height = 24, width = 24)
+       units = "cm", height = roc_h_cm, width = roc_w_cm)
 
-ROC_curve_plot
+
 ```
 
 ## 6.2 Observed vs predicted occurrence
@@ -524,20 +612,33 @@ ROC_df2 %>%
   rename(TPR_b = "TPR", FPR_b = "FPR") %>%
   distinct() -> balanced_score_df2
 
+roc_labels2 <- make_roc_labels(m_second_bin$Y, auc_bin2_df, balanced_score_df2,
+                               genus_with_variation2) %>%
+  mutate(pred_name = str_replace(pred_name, "OTU", "ASV"))
+order_genus_roc2 <- roc_labels2 %>% arrange(desc(AUC)) %>% pull(pred_name)
+# Same factor levels in the label layer, otherwise ggplot falls back to
+# alphabetical order when mixing a factor (main data) and a character (labels)
+roc_labels2 <- roc_labels2 %>%
+  mutate(pred_name = factor(pred_name, levels = order_genus_roc2))
+roc_txt2 <- roc_text_size(length(genus_with_variation2), roc_w_cm, roc_h_cm)
+
 ROC_df2 %>%
   left_join(balanced_score_df2 %>%
               rename(threshold_B = "threshold"),
             by = "pred_name") %>%
   arrange(threshold) %>%
-  mutate(pred_name = str_replace(pred_name, "OTU", "ASV")) %>%
+  mutate(pred_name = factor(str_replace(pred_name, "OTU", "ASV"),
+                            levels = order_genus_roc2)) %>%
   ggplot() +
-  facet_wrap(~pred_name) +
+  facet_wrap(~pred_name, labeller = roc_strip_labeller) +
   geom_path(aes(x = FPR, y = TPR), linewidth = 0.8) +
   geom_vline(aes(xintercept = FPR_b), col = "blue", linetype = 2, linewidth = 0.6) +
   geom_hline(aes(yintercept = TPR_b), col = "blue", linetype = 2, linewidth = 0.6) +
-  geom_text(aes(x = 0.7, y = 0.1,
-                label = paste("thr =", round(threshold_B, 2))),
-            col = "blue", size = 1.5) +
+  geom_label(data = roc_labels2,
+             aes(x = 0.97, y = 0.03, label = label),
+             hjust = 1, vjust = 0, lineheight = 0.9, size = roc_txt2,
+             col = "blue", fill = alpha("white", 0.75),
+             linewidth = 0, label.padding = unit(0.15, "lines")) +
   coord_cartesian(xlim = c(0, 1), ylim = c(0, 1.01), expand = FALSE) +
   geom_abline(linetype = "dashed") +
   labs(x = "False Positive Rate\n(False presence predicted / all true absence)",
@@ -547,11 +648,11 @@ ROC_df2 %>%
 
 ggsave(plot = ROC_curve_plot2,
        filename = "figures/genus_bin_autocorr/ROC_curves_bin_second_best_waic.pdf",
-       units = "cm", height = 24, width = 24)
+       units = "cm", height = roc_h_cm, width = roc_w_cm)
 
 ggsave(plot = ROC_curve_plot2,
        filename = "figures/figures_manuscript/ROC_curves_bin_second_best_waic.pdf",
-       units = "cm", height = 24, width = 24)
+       units = "cm", height = roc_h_cm, width = roc_w_cm)
 ROC_curve_plot2
 ```
 

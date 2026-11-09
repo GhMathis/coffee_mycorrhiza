@@ -103,6 +103,13 @@ model_list <- setNames(
   sapply(all_cov_sets, make_gauss_name)
 )
 
+mpost0 <- convertToCodaObject(list_mods_bin[[1]]$m_converg)
+str(mpost)
+
+temp0 <- gelman.diag(mpost0$Beta, multivariate = FALSE)$psrf
+mpostfull <- convertToCodaObject(list_mods_bin[[32]]$m_converg)
+tempfull <- gelman.diag(mpostfull$Beta, multivariate = FALSE)$psrf
+nrow(tempfull)
 
 ## ----echo=FALSE---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 10, samples = 2000,  test.run = T){
@@ -147,16 +154,17 @@ compute.hmsc <- function(hmsc_mod, nfold = 10, nChains = 10, samples = 2000,  te
 }
 
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-model_list %>%
-  purrr::imap(\(x, nm) {
-    cat(sprintf("\n[Gaussian %d/%d] %s\n", which(names(model_list) == nm), length(model_list), nm))
-    compute.hmsc(x, nfold = nfolds, nChains = nChains, samples = 2000, test.run = test_run)
-  }) -> list_mods
-list_mods$mod_pois_null$hmsc_mod$Y %>% str
+
 if(file.exists("outputs/models/list_mods_genus_gauss_phylo_autocorr.RData")){
   # safe save in case a model list in already present in the folder
+  load("outputs/models/list_mods_genus_gauss_phylo_autocorr.RData")
   save(list_mods, file = "outputs/models/list_mods_genus_gauss_phylo_autocorr_safesave.RData")
 }else{
+  model_list %>%
+    purrr::imap(\(x, nm) {
+      cat(sprintf("\n[Gaussian %d/%d] %s\n", which(names(model_list) == nm), length(model_list), nm))
+      compute.hmsc(x, nfold = nfolds, nChains = nChains, samples = 2000, test.run = test_run)
+    }) -> list_mods
   save(list_mods, file = "outputs/models/list_mods_genus_gauss_phylo_autocorr.RData")
 }
 
@@ -197,17 +205,16 @@ model_bin_list <- setNames(
 
 ## -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-
-model_bin_list %>%
-  purrr::imap(\(x, nm) {
-    cat(sprintf("\n[Probit %d/%d] %s\n", which(names(model_bin_list) == nm), length(model_bin_list), nm))
-    compute.hmsc(x, nfold = nfolds, nChains = nChains, samples = 1000, test.run = test_run)
-  }) -> list_mods_bin
-
 if(file.exists("outputs/models/list_mods_bin_phylo_autocorr_genus.RData")){
   # safe save in case a model list in already present in the folder
+  load("outputs/models/list_mods_bin_phylo_autocorr_genus.RData")
   save(list_mods_bin, file = "outputs/models/list_mods_bin_phylo_autocorr_genus_safesave.RData")
 }else{
+  model_bin_list %>%
+    purrr::imap(\(x, nm) {
+      cat(sprintf("\n[Probit %d/%d] %s\n", which(names(model_bin_list) == nm), length(model_bin_list), nm))
+      compute.hmsc(x, nfold = nfolds, nChains = nChains, samples = 1000, test.run = test_run)
+    }) -> list_mods_bin
   save(list_mods_bin, file = "outputs/models/list_mods_bin_phylo_autocorr_genus.RData")
 }
 
