@@ -113,7 +113,7 @@ map_ug <- rnaturalearth::ne_states("Uganda", returnclass = "sf")
 
 
 # Samples retained after the rarefaction step (see 3_rarefaction_AMF.Rmd:
-# samples with < 10^3.1 reads were removed before rarefaction)
+# samples with < 2101 reads were removed before rarefaction)
 kept_samples <- read.table("outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.afm_rarefy_allgenus.txt",
                            header = TRUE, stringsAsFactors = FALSE, nrows = 1) %>%
   dplyr::select(starts_with("ROB")) %>%
@@ -126,13 +126,13 @@ table(wgs84_coords$rarefaction_status)
 
 ggplot(map_ug) +
   geom_sf() +
-  geom_point(data = wgs84_coords, aes(x = lon, y = lat, fill = rarefaction_status), cex = 3, shape= 21, alpha = 0.3) +
+  geom_jitter(data = wgs84_coords, aes(x = lon, y = lat, fill = rarefaction_status), cex = 3, shape= 21, alpha = 0.5,width = 0.05, height = 0.05) +
   scale_fill_manual(values = c("Kept" = "black", "Removed (rarefaction)" = "red"),
                      name = NULL) +
   main_theme_final -> ug_sampling_map
 ug_sampling_map
 
-ggsave(plot = ug_sampling_map, filename = "figures/genus/ug_sampling_map.pdf", units = "cm", width = 12 ,height = 12)
+ggsave(plot = ug_sampling_map, filename = "figures/genus/ug_sampling_map.pdf", units = "cm", width = 24 ,height = 24)
 ```
 
 ```{r}

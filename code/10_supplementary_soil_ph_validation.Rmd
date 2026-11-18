@@ -87,7 +87,7 @@ scatter_plot <- function(variable, label) {
 
   lims <- range(c(df$obs, df$pred))
   fit <- lm(pred ~ obs, data = df)
-  txt <- sprintf("n = %d\nr = %.2f (p = %.2g)\nRMSE = %.2f",
+  txt <- sprintf("n = %d\nr = %.2f",
                  nrow(df), cor(df$obs, df$pred),
                  summary(fit)$coefficients["obs", 4],
                  sqrt(mean((df$pred - df$obs)^2)))

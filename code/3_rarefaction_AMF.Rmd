@@ -81,7 +81,7 @@ plot.OTUcumSums <-function(x){plot(1:length(colSums(x)), log10(sort(colSums(x))+
 amf_OTUs_decont %>%
   dplyr::select(starts_with("ROB")) %>%
   plot.OTUcumSums
-10^3.1
+2101  # minimum reads per sample (samples below are discarded; also the rarefaction depth)
 log10(10)
 amf_OTUs_decont %>%
   dplyr::select(starts_with("ROB"))%>%
@@ -98,7 +98,7 @@ amf_OTUs_decont %>%
 amf_OTUs_decont2 <- amf_OTUs_decont %>%
   #{{sample to exclude}}
   dplyr::select(starts_with("ROB"))%>%
-  dplyr::select(where(~ sum(.x) >= 10^3.1))
+  dplyr::select(where(~ sum(.x) >= 2101))
 smallest_amf <- min(colSums(amf_OTUs_decont2))
 ```
 
@@ -157,6 +157,11 @@ amf_OTUs_rare %>%
   left_join(amf_OTUs_decont %>%
               rownames_to_column("amplicon") %>%
               dplyr::select(-starts_with("ROB")), by ="amplicon") -> amf_OTUs_rare
+amf_OTUs_rare %>%
+  select(starts_with("ROB")) %>%
+  as.matrix() %>%
+  rowSums() %>%
+  sum
 
 write.table(amf_OTUs_rare, "outputs/abundance_tables/Robust_MiSeq_18S_AMf_20241120_125_samples.OTU.filtered.cleaved.nosubstringOTUs.mumu.rarefy.txt")
 ```
@@ -166,7 +171,7 @@ write.table(amf_OTUs_rare, "outputs/abundance_tables/Robust_MiSeq_18S_AMf_202411
 ```{r}
 amf_OTUs_decont %>%
   #{{sample to exclude}}
-  dplyr::select(where(~ ifelse(is.numeric(.x), sum(.x) >= 10^3.1, is.character(.x))))  %>%
+  dplyr::select(where(~ ifelse(is.numeric(.x), sum(.x) >= 2101, is.character(.x))))  %>%
   unite(taxonomy, kingdom, phylum, class, order, family, genus, sep = "; ") %>%
   dplyr::select(taxonomy, starts_with("ROB")) %>%
   group_by(taxonomy)%>%
